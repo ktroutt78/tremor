@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <rect width="64" height="64" fill="#0b1220"/>
+  <!-- concentric rings on the app's depth ramp: crustal red out to slab cyan -->
+  <circle cx="32" cy="32" r="26" fill="none" stroke="#3ec8e0" stroke-width="3" opacity=".55"/>
+  <circle cx="32" cy="32" r="18" fill="none" stroke="#8c6ae0" stroke-width="3" opacity=".7"/>
+  <circle cx="32" cy="32" r="11" fill="none" stroke="#ff9f45" stroke-width="3" opacity=".85"/>
+  <circle cx="32" cy="32" r="5" fill="#ff5f4a"/>
+</svg>
