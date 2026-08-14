@@ -37,7 +37,13 @@
 #                worker from a generated blob URL.
 #   connect-src  jsdelivr for the .wasm bundle fetch, USGS for the live feeds,
 #                'self' for manifest.json / the Parquets / land.geojson,
-#                blob: for the worker bootstrap.
+#                blob: for the worker bootstrap, and extensions.duckdb.org —
+#                DuckDB-WASM lazily downloads its json and parquet extensions
+#                from there on first use. Omitting it does not fail loudly: the
+#                page boots, then every read_json/read_parquet call dies with
+#                "Table with name live does not exist" and the boot overlay
+#                never clears. A local server sends no CSP, so this only ever
+#                reproduces in production.
 #   style-src    'unsafe-inline' is load-bearing — the page ships one <style>
 #                block plus inline style attributes on the legend swatches.
 #   There is no img-src entry for a tile CDN: the basemap is land.geojson drawn
@@ -46,6 +52,6 @@
 [[headers]]
   for = "/*"
   [headers.values]
-    Content-Security-Policy = "default-src 'self'; script-src 'self' https://cdn.jsdelivr.net https://unpkg.com 'wasm-unsafe-eval' blob:; worker-src blob:; connect-src 'self' https://cdn.jsdelivr.net https://earthquake.usgs.gov blob:; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; object-src 'none'; base-uri 'self'; frame-ancestors 'none'"
+    Content-Security-Policy = "default-src 'self'; script-src 'self' https://cdn.jsdelivr.net https://unpkg.com 'wasm-unsafe-eval' blob:; worker-src blob:; connect-src 'self' https://cdn.jsdelivr.net https://extensions.duckdb.org https://earthquake.usgs.gov blob:; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; object-src 'none'; base-uri 'self'; frame-ancestors 'none'"
     X-Content-Type-Options = "nosniff"
     Referrer-Policy = "strict-origin-when-cross-origin"
