@@ -80,18 +80,17 @@ let zoomNow = 0, contextSig = "";
 // orient rather than clutter. Below it, country outlines carry the map.
 const STATE_LINE_ZOOM = 3.2;
 
-// Natural Earth calibrates min_label for a map that owns the full window. This
-// one is inset beside a 420px rail and framed to fit the whole world, so its
-// world view lands near zoom 1.45 — under NE's lowest threshold of 1.7, which
-// left the world view with borders and no names at all. Shifting the floor down
-// lets the top tier (Japan, Indonesia, Peru, Mexico, Russia) label at world
-// zoom without dragging in the long tail.
-const LABEL_ZOOM_OFFSET = 0.6;
+// No names at all until the view is tighter than the presets. The world and
+// Ring of Fire frames are about the shape of the data, and country labels
+// scattered across them read as noise over the one thing worth looking at.
+// Both presets sit below this (world lands near 1.45, ring at 2.1), so names
+// are something you zoom in to get rather than something you dismiss.
+const LABEL_MIN_ZOOM = 2.5;
 
 /** NE's max_label is deliberately ignored — it assumes city labels take over at
  *  high zoom, and this map has none, so honouring it makes names vanish exactly
  *  when someone zooms in to read them. Off-viewport labels cost nothing. */
-const labelVisible = (l, z) => z >= l.min - LABEL_ZOOM_OFFSET;
+const labelVisible = (l, z) => z >= LABEL_MIN_ZOOM && z >= l.min;
 
 /** What the context layers would render at this zoom — used to skip redraws. */
 function contextSignature(z) {
@@ -831,6 +830,11 @@ function draw(alphaOverride) {
         getTextAnchor: "middle",
         getAlignmentBaseline: "center",
         pickable: false,
+        // Natural Earth's anchors are per-country, not per-frame, so at some
+        // zooms neighbours still land on top of each other (Israel over
+        // Jordan). CollisionFilterExtension is the documented fix and ships in
+        // this bundle, but wiring it to this layer changed nothing on screen,
+        // so it is left out rather than carried as a dead render pass.
         updateTriggers: { getText: visible.length, getSize: visible.length },
       }));
     }
