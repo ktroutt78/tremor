@@ -1,0 +1,421 @@
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Tremor — the ground is never still</title>
+
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link
+  href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=Barlow:wght@400;500&family=IBM+Plex+Mono:wght@400;500&display=swap"
+  rel="stylesheet"
+/>
+
+<script src="https://unpkg.com/deck.gl@9.0.35/dist.min.js"></script>
+
+<style>
+  :root {
+    --ground: #0b1220;      /* ocean */
+    --land:   #1a2333;      /* land sits lighter, so coastlines read */
+    --coast:  #2d3a52;
+    --panel: #131c2b;
+    --panel-2: #182335;
+    --rule: #26324a;
+    --ink: #e4e9f2;
+    --muted: #7c8ca8;
+    --d0: #ff5f4a;   /* 0-35 km   crustal */
+    --d1: #ff9f45;   /* 35-70            */
+    --d2: #e0559b;   /* 70-150           */
+    --d3: #8c6ae0;   /* 150-300          */
+    --d4: #3ec8e0;   /* 300+      slab   */
+    --live: #ffe066;
+    --amber: #ffb03a;
+  }
+
+  * { box-sizing: border-box; }
+
+  html, body {
+    margin: 0; height: 100%;
+    background: var(--ground); color: var(--ink);
+    font-family: Barlow, system-ui, sans-serif;
+    overflow: hidden;
+  }
+
+  #map { position: fixed; inset: 0; }
+  #map canvas { outline: none; }
+
+  /* ---------- left rail ---------- */
+  #rail {
+    position: fixed; top: 0; left: 0; bottom: 0;
+    width: 420px;
+    background: linear-gradient(180deg, rgba(19,28,43,.97), rgba(11,18,32,.97));
+    border-right: 1px solid var(--rule);
+    padding: 24px 26px 20px;
+    overflow-y: auto; z-index: 5;
+    backdrop-filter: blur(8px);
+  }
+
+  .eyebrow {
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 10.5px; letter-spacing: .18em;
+    text-transform: uppercase; color: var(--muted);
+  }
+
+  h1 {
+    font-family: "Barlow Condensed", sans-serif;
+    font-weight: 700; font-size: 52px; line-height: .93;
+    letter-spacing: -.01em; margin: 10px 0 12px;
+    text-transform: uppercase;
+  }
+  h1 .hot { color: var(--d0); }
+
+  .standfirst { font-size: 14.5px; line-height: 1.5; color: #b9c4d6; margin: 0 0 20px; }
+
+  .rule { height: 1px; background: var(--rule); margin: 18px 0; }
+
+  h2 {
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 10.5px; font-weight: 500; letter-spacing: .18em;
+    text-transform: uppercase; color: var(--muted); margin: 0 0 11px;
+    display: flex; justify-content: space-between; align-items: baseline; gap: 8px;
+  }
+  h2 .sel { color: var(--ink); letter-spacing: .08em; }
+
+  /* ---------- live ticker ---------- */
+  #live { border: 1px solid var(--rule); background: var(--panel-2); padding: 12px 14px; display: flex; align-items: center; gap: 13px; }
+  #live .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--live); flex: none; animation: pulse 1.9s ease-in-out infinite; }
+  @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: .22; } }
+  #live .n { font-family: "Barlow Condensed", sans-serif; font-weight: 600; font-size: 27px; line-height: 1; }
+  #live .lab { font-family: "IBM Plex Mono", monospace; font-size: 9.5px; letter-spacing: .12em; text-transform: uppercase; color: var(--muted); margin-top: 5px; }
+
+  /* ---------- depth ramp: legend and filter ---------- */
+  #depth { display: flex; height: 32px; border: 1px solid var(--rule); overflow: hidden; cursor: pointer; }
+  #depth div { flex: 1; display: flex; align-items: center; justify-content: center; font-family: "IBM Plex Mono", monospace; font-size: 9.5px; color: #0b1220; font-weight: 500; transition: opacity .18s; }
+  #depth div.dim { opacity: .2; }
+  #depth .b0 { background: var(--d0); } #depth .b1 { background: var(--d1); }
+  #depth .b2 { background: var(--d2); } #depth .b3 { background: var(--d3); }
+  #depth .b4 { background: var(--d4); }
+  .ramp-axis { display: flex; justify-content: space-between; font-family: "IBM Plex Mono", monospace; font-size: 9.5px; color: var(--muted); margin-top: 6px; }
+  .note { font-size: 12.5px; color: var(--muted); margin-top: 9px; line-height: 1.45; }
+  .note b { color: #b9c4d6; font-weight: 500; }
+
+  /* ---------- stats ---------- */
+  .stats { display: grid; grid-template-columns: 1fr 1fr; gap: 1px; background: var(--rule); border: 1px solid var(--rule); }
+  .stat { background: var(--panel-2); padding: 12px 14px; }
+  .stat .v { font-family: "Barlow Condensed", sans-serif; font-weight: 600; font-size: 27px; line-height: 1; }
+  .stat .k { font-family: "IBM Plex Mono", monospace; font-size: 9.5px; letter-spacing: .12em; text-transform: uppercase; color: var(--muted); margin-top: 5px; }
+
+  /* ---------- magnitude ---------- */
+  #magwrap { display: flex; align-items: center; gap: 12px; }
+  input[type="range"] { flex: 1; accent-color: var(--d0); background: transparent; }
+  input[type="range"]:focus-visible { outline: 2px solid var(--d1); outline-offset: 3px; }
+  #magval { font-family: "IBM Plex Mono", monospace; font-size: 13px; min-width: 46px; text-align: right; }
+
+  /* ---------- buttons ---------- */
+  .btns { display: flex; gap: 6px; }
+  button {
+    flex: 1; font-family: "IBM Plex Mono", monospace; font-size: 10.5px;
+    letter-spacing: .09em; text-transform: uppercase; color: var(--muted);
+    background: var(--panel-2); border: 1px solid var(--rule); border-radius: 3px;
+    padding: 9px 5px; cursor: pointer;
+    transition: color .15s, border-color .15s, background .15s;
+  }
+  button:hover:not(:disabled) { color: var(--ink); border-color: #3a4a6b; }
+  button[aria-pressed="true"] { color: var(--ground); background: var(--ink); border-color: var(--ink); }
+  button:disabled { opacity: .45; cursor: default; }
+  button:focus-visible { outline: 2px solid var(--d1); outline-offset: 2px; }
+  #b-decade { background: #1e2c44; color: var(--ink); border-color: #3a4a6b; }
+  #b-decade[data-loaded="true"] { background: var(--panel-2); }
+
+  /* ---------- timeline ---------- */
+  #timeline {
+    position: fixed; left: 420px; right: 0; bottom: 0; height: 152px;
+    background: linear-gradient(0deg, rgba(11,18,32,.96), rgba(11,18,32,.72) 70%, transparent);
+    padding: 16px 30px 14px; z-index: 4;
+  }
+  .tl-head { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 8px; gap: 14px; }
+  .tl-left { display: flex; align-items: baseline; gap: 11px; }
+  #tl-clear {
+    flex: none; font-family: "IBM Plex Mono", monospace; font-size: 10px;
+    letter-spacing: .12em; text-transform: uppercase;
+    background: var(--d0); color: #0b1220; border: 1px solid var(--d0);
+    border-radius: 2px; padding: 4px 9px; cursor: pointer;
+  }
+  #tl-clear:hover { background: var(--d1); border-color: var(--d1); }
+  #tl-clear[hidden] { display: none; }
+  .tl-when { font-family: "Barlow Condensed", sans-serif; font-weight: 700; font-size: 32px; line-height: 1; }
+  #bars { display: flex; align-items: flex-end; gap: 1px; height: 58px; }
+  #bars .bar { flex: 1; background: #2c3c5c; min-height: 2px; cursor: pointer; transition: background .15s; }
+  #bars .bar.on { background: var(--d0); }
+  #bars .bar:hover { background: var(--d1); }
+  #bars .bar.live { background: var(--live); }
+  /* month still accumulating, or outside archive coverage — hatched so a
+     short bar is never mistaken for a quiet period */
+  #bars .bar.partial { background: repeating-linear-gradient(-45deg, #2c3c5c 0 3px, transparent 3px 6px); border-top: 1px solid #46587e; }
+  #bars .bar.gap { background: repeating-linear-gradient(-45deg, #4a3a2a 0 3px, transparent 3px 6px); border-top: 1px solid var(--amber); }
+  .tl-axis { display: flex; justify-content: space-between; font-family: "IBM Plex Mono", monospace; font-size: 10px; color: var(--muted); margin-top: 6px; }
+  #cursor { position: absolute; top: 46px; bottom: 44px; width: 1px; background: var(--live); display: none; pointer-events: none; }
+
+  /* ---------- tooltip ---------- */
+  #tip {
+    position: fixed; z-index: 9; pointer-events: none;
+    background: rgba(8,13,24,.97); border: 1px solid var(--rule);
+    padding: 10px 12px; font-family: "IBM Plex Mono", monospace;
+    font-size: 11px; line-height: 1.6; display: none; max-width: 300px;
+  }
+  #tip .place { color: var(--ink); font-size: 12px; }
+  #tip b { color: var(--d1); font-weight: 500; }
+  #tip .felt { color: var(--live); }
+  #tip .chip { display: inline-block; padding: 1px 6px; border-radius: 2px; color: #0b1220; font-size: 9.5px; letter-spacing: .1em; text-transform: uppercase; margin-top: 4px; }
+  #tip .hint { color: #55637d; font-size: 10px; }
+
+  /* ---------- boot / perf / footer ---------- */
+  #boot { position: fixed; inset: 0; z-index: 20; background: var(--ground); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 16px; }
+  #boot .bar-wrap { width: 210px; height: 2px; background: var(--rule); overflow: hidden; }
+  #boot .bar-fill { height: 100%; width: 30%; background: var(--d0); animation: slide 1.15s infinite ease-in-out; }
+  @keyframes slide { 0% { transform: translateX(-110%); } 100% { transform: translateX(360%); } }
+  #boot .msg { font-family: "IBM Plex Mono", monospace; font-size: 11.5px; letter-spacing: .12em; text-transform: uppercase; color: var(--muted); }
+  #boot .err { color: var(--d0); text-transform: none; letter-spacing: 0; max-width: 480px; text-align: center; line-height: 1.6; }
+
+  #perf { position: fixed; right: 18px; top: 18px; z-index: 6; font-family: "IBM Plex Mono", monospace; font-size: 10.5px; color: var(--muted); text-align: right; line-height: 1.7; }
+  #perf b { color: var(--d4); font-weight: 500; }
+
+  #banner {
+    position: fixed; top: 0; left: 420px; right: 0; z-index: 7; display: none;
+    background: #3a2a10; border-bottom: 1px solid var(--amber);
+    color: #ffd89a; font-family: "IBM Plex Mono", monospace;
+    font-size: 11px; padding: 9px 16px; line-height: 1.5;
+  }
+  /* ---------- legend ---------- */
+  #legend {
+    position: fixed; right: 18px; bottom: 168px; z-index: 6;
+    width: 216px; background: rgba(11,18,32,.94);
+    border: 1px solid var(--rule); padding: 12px 13px 11px;
+    font-family: "IBM Plex Mono", monospace; font-size: 10px;
+    color: var(--muted); line-height: 1.5;
+  }
+  #legend[hidden] { display: none; }
+
+  /* Hiding the legend collapses it to a handle in the same corner rather than
+     removing it outright — otherwise the only way back is a rail button below
+     the fold or an undiscoverable keyboard shortcut. */
+  #legend-show {
+    position: fixed; right: 18px; bottom: 168px; z-index: 6;
+    flex: none; display: flex; align-items: center; gap: 7px;
+    font-family: "IBM Plex Mono", monospace; font-size: 10px;
+    letter-spacing: .14em; text-transform: uppercase;
+    background: rgba(11,18,32,.94); border: 1px solid var(--rule);
+    color: var(--muted); padding: 8px 12px; border-radius: 0; cursor: pointer;
+  }
+  #legend-show[hidden] { display: none; }
+  #legend-show:hover { color: var(--ink); border-color: #3a4a6b; }
+  #legend-show .key {
+    border: 1px solid var(--rule); border-radius: 2px;
+    padding: 0 4px; font-size: 9px; color: #55637d;
+  }
+  #legend-show .swatches { display: flex; width: 34px; height: 8px; }
+  #legend-show .swatches i { flex: 1; }
+  .lg-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
+  .lg-head span { letter-spacing: .18em; text-transform: uppercase; color: var(--muted); }
+  #lg-close {
+    flex: none; width: 18px; height: 18px; padding: 0; font-size: 13px;
+    line-height: 1; background: transparent; border: 1px solid var(--rule);
+    color: var(--muted); border-radius: 2px; cursor: pointer;
+  }
+  #lg-close:hover { color: var(--ink); border-color: #3a4a6b; }
+  .lg-sec { margin-bottom: 11px; }
+  .lg-t { letter-spacing: .14em; text-transform: uppercase; color: #55637d; margin-bottom: 6px; }
+  .lg-ramp { display: flex; height: 11px; }
+  .lg-ramp div { flex: 1; }
+  .lg-axis { display: flex; justify-content: space-between; margin-top: 4px; color: #55637d; }
+  .lg-mags { display: flex; align-items: flex-end; gap: 13px; height: 32px; padding: 0 3px; }
+  .lg-mag { display: flex; flex-direction: column; align-items: center; gap: 4px; }
+  .lg-mag i { display: block; border-radius: 50%; background: var(--d0); opacity: .82; }
+  .lg-row { display: flex; align-items: center; gap: 8px; margin-top: 5px; }
+  .lg-ring { width: 12px; height: 12px; border-radius: 50%; flex: none; background: transparent; }
+  .lg-ring.hour { border: 1.5px solid var(--live); }
+  .lg-ring.major { border: 1px solid #e2e9f5; }
+  .lg-cap { color: #55637d; line-height: 1.45; }
+
+  .credit { font-size: 11px; color: #55637d; line-height: 1.55; margin-top: 20px; }
+  #footer { font-family: "IBM Plex Mono", monospace; font-size: 10px; color: #55637d; margin-top: 14px; display: flex; align-items: center; gap: 7px; }
+  #footer .amber { width: 7px; height: 7px; border-radius: 50%; background: var(--amber); display: none; flex: none; }
+
+  @media (prefers-reduced-motion: reduce) {
+    * { animation-duration: .001ms !important; transition-duration: .001ms !important; }
+  }
+  @media (max-width: 900px) {
+    #rail { width: 100%; height: auto; bottom: auto; max-height: 58%; border-right: none; border-bottom: 1px solid var(--rule); }
+    #timeline, #banner { left: 0; }
+    #perf { display: none; }
+    #legend { width: 178px; right: 10px; bottom: 160px; font-size: 9.5px; }
+    #legend-show { right: 10px; bottom: 160px; }
+  }
+</style>
+
+<div id="map"></div>
+<div id="banner"></div>
+
+<aside id="rail">
+  <div class="eyebrow" id="eyebrow">USGS ANSS · Queried client-side</div>
+  <h1>The ground<br />is <span class="hot">never</span><br />still.</h1>
+  <p class="standfirst" id="standfirst">
+    Every earthquake on Earth, live and for the past decade. Nobody drew the
+    plate boundaries on this map — the earthquakes did.
+  </p>
+
+  <div id="live">
+    <div class="dot"></div>
+    <div>
+      <div class="n" id="live-n">—</div>
+      <div class="lab" id="live-lab">In the past hour · all magnitudes</div>
+    </div>
+  </div>
+
+  <div class="rule"></div>
+
+  <h2>Time window <span class="sel" id="win-sel"></span></h2>
+  <div class="btns" id="windows">
+    <button data-win="hour">Hour</button>
+    <button data-win="day">Day</button>
+    <button data-win="week">Week</button>
+    <button data-win="month" aria-pressed="true">30 days</button>
+    <button data-win="all">Decade</button>
+  </div>
+  <p class="note" id="win-note"></p>
+
+  <div class="rule"></div>
+
+  <h2>Depth <span class="sel" id="depth-sel"></span></h2>
+  <div id="depth" role="group" aria-label="Filter by hypocenter depth">
+    <div class="b0" data-lo="0"   data-hi="35"   role="button" tabindex="0" aria-pressed="false">35</div>
+    <div class="b1" data-lo="35"  data-hi="70"   role="button" tabindex="0" aria-pressed="false">70</div>
+    <div class="b2" data-lo="70"  data-hi="150"  role="button" tabindex="0" aria-pressed="false">150</div>
+    <div class="b3" data-lo="150" data-hi="300"  role="button" tabindex="0" aria-pressed="false">300</div>
+    <div class="b4" data-lo="300" data-hi="1000" role="button" tabindex="0" aria-pressed="false">700</div>
+  </div>
+  <div class="ramp-axis"><span>SURFACE</span><span>KM DEEP</span></div>
+  <p class="note">
+    Warm is shallow crust. Cool is a slab of ocean floor diving under a
+    continent. Click a band to isolate it — the deep ones trace subduction.
+  </p>
+
+  <div class="rule"></div>
+
+  <h2>Selection</h2>
+  <div class="stats">
+    <div class="stat"><div class="v" id="s-n">—</div><div class="k">Events</div></div>
+    <div class="stat"><div class="v" id="s-max">—</div><div class="k">Largest</div></div>
+    <div class="stat"><div class="v" id="s-deep">—</div><div class="k">Deepest km</div></div>
+    <div class="stat"><div class="v" id="s-felt">—</div><div class="k">Felt reports</div></div>
+  </div>
+
+  <div class="rule"></div>
+
+  <h2>Magnitude floor</h2>
+  <div id="magwrap">
+    <input id="mag" type="range" min="4.5" max="7" step="0.1" value="4.5" aria-label="Minimum magnitude" />
+    <span id="magval">M4.5</span>
+  </div>
+  <p class="note">
+    Floored at <b>M4.5</b>, where USGS coverage is globally complete. Below
+    that, density tracks instrument placement more than geology.
+  </p>
+
+  <div class="rule"></div>
+
+  <h2>Archive</h2>
+  <div class="btns">
+    <button id="b-decade" data-loaded="false">Show the full decade</button>
+  </div>
+  <p class="note" id="decade-note"></p>
+
+  <h2 style="margin-top:18px">View</h2>
+  <div class="btns">
+    <button id="b-world" aria-pressed="true">World</button>
+    <button id="b-ring" aria-pressed="false">Ring of fire</button>
+    <button id="b-ca" aria-pressed="false">California</button>
+  </div>
+  <div class="btns" style="margin-top:6px">
+    <button id="b-majors" aria-pressed="true">M8+ · 100</button>
+    <button id="b-play" aria-pressed="false" disabled>Play</button>
+  </div>
+  <div class="btns" style="margin-top:6px">
+    <button id="b-all" disabled aria-pressed="false">Clear month</button>
+    <button id="b-legend" aria-pressed="true" title="Toggle legend (L)">Legend</button>
+  </div>
+  <p class="note">
+    Pale rings are the great earthquakes since 1900 — Chile 1960, Alaska
+    1964, Sumatra 2004, Tōhoku 2011. They sit outside the archive window, so
+    the month and depth filters leave them alone.
+  </p>
+
+  <div id="footer"><span class="amber" id="footer-amber"></span><span id="footer-text">—</span></div>
+
+  <p class="credit">
+    Source: USGS Advanced National Seismic System (ANSS) Comprehensive
+    Catalog via the FDSN event service, plus the past-hour and past-month
+    live feeds. Coastlines: Natural Earth 1:50m.
+  </p>
+</aside>
+
+<div id="timeline">
+  <div class="tl-head">
+    <div class="tl-left">
+      <div class="tl-when" id="tl-when">—</div>
+      <button id="tl-clear" hidden title="Clear month filter (Esc)">Clear ✕</button>
+    </div>
+    <div class="eyebrow" id="tl-lab">Events per month · M4.5+</div>
+  </div>
+  <div id="bars"></div>
+  <div id="cursor"></div>
+  <div class="tl-axis" id="tl-axis"></div>
+</div>
+
+<div id="legend" aria-label="Map legend">
+  <div class="lg-head">
+    <span>Legend</span>
+    <button id="lg-close" title="Hide legend (L)" aria-label="Hide legend">×</button>
+  </div>
+
+  <div class="lg-sec">
+    <div class="lg-t">Depth of hypocentre</div>
+    <div class="lg-ramp">
+      <div style="background:var(--d0)"></div><div style="background:var(--d1)"></div>
+      <div style="background:var(--d2)"></div><div style="background:var(--d3)"></div>
+      <div style="background:var(--d4)"></div>
+    </div>
+    <div class="lg-axis"><span>0 km</span><span>crust → slab</span><span>700</span></div>
+  </div>
+
+  <div class="lg-sec">
+    <div class="lg-t">Magnitude</div>
+    <div class="lg-mags" id="lg-mags"></div>
+    <div class="lg-cap" id="lg-magcap"></div>
+  </div>
+
+  <div class="lg-sec">
+    <div class="lg-t">Overlays</div>
+    <div class="lg-row"><span class="lg-ring hour"></span>Past hour · all magnitudes</div>
+    <div class="lg-row"><span class="lg-ring major"></span>M8+ since 1900</div>
+  </div>
+
+  <div class="lg-cap">Overlapping events brighten, so density reads as luminance.</div>
+</div>
+
+<button id="legend-show" hidden title="Show legend (L)" aria-label="Show legend">
+  <span class="swatches">
+    <i style="background:var(--d0)"></i><i style="background:var(--d1)"></i>
+    <i style="background:var(--d2)"></i><i style="background:var(--d3)"></i>
+    <i style="background:var(--d4)"></i>
+  </span>
+  Legend <span class="key">L</span>
+</button>
+
+<div id="perf"></div>
+<div id="tip"></div>
+
+<div id="boot">
+  <div class="msg" id="boot-msg">Starting</div>
+  <div class="bar-wrap"><div class="bar-fill"></div></div>
+</div>
+
+<script type="module" src="app.js"></script>

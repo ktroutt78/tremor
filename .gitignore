@@ -1,0 +1,14 @@
+.DS_Store
+._*
+
+# The Ignition wildfire prototype this folder started as. Kept on disk, out of
+# the published repo — different project, ~10MB of data the site never loads.
+fires/
+
+# Undated leftovers from before prepare_quakes.py switched to the
+# quakes-YYYY-MM-DD.parquet scheme. manifest.json never points at these.
+quakes.parquet
+majors.parquet
+
+# Drafts, not project files.
+linkedin-serverless-dashboards.md
