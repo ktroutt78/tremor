@@ -70,6 +70,36 @@ const COLS = `ID, TIME, MAG, MAG_TYPE, DEPTH_KM, LATITUDE, LONGITUDE,
               PLACE, FELT, CDI, MMI, ALERT, TSUNAMI, SIG`;
 
 let db = null, conn = null, deckgl = null, landLayer = null;
+// Political context for the basemap. Borders split by admin level at load so
+// each renders as its own flat stroke; labels stay raw because which ones are
+// visible depends on the live zoom.
+let borders0 = null, borders1 = null, placeLabels = null;
+let zoomNow = 0, contextSig = "";
+
+// Above this zoom the frame is regional enough that state and province lines
+// orient rather than clutter. Below it, country outlines carry the map.
+const STATE_LINE_ZOOM = 3.2;
+
+// Natural Earth calibrates min_label for a map that owns the full window. This
+// one is inset beside a 420px rail and framed to fit the whole world, so its
+// world view lands near zoom 1.45 — under NE's lowest threshold of 1.7, which
+// left the world view with borders and no names at all. Shifting the floor down
+// lets the top tier (Japan, Indonesia, Peru, Mexico, Russia) label at world
+// zoom without dragging in the long tail.
+const LABEL_ZOOM_OFFSET = 0.6;
+
+/** NE's max_label is deliberately ignored — it assumes city labels take over at
+ *  high zoom, and this map has none, so honouring it makes names vanish exactly
+ *  when someone zooms in to read them. Off-viewport labels cost nothing. */
+const labelVisible = (l, z) => z >= l.min - LABEL_ZOOM_OFFSET;
+
+/** What the context layers would render at this zoom — used to skip redraws. */
+function contextSignature(z) {
+  if (!placeLabels) return "";
+  let n = 0;
+  for (const l of placeLabels) if (labelVisible(l, z)) n++;
+  return `${n}|${z >= STATE_LINE_ZOOM ? 1 : 0}`;
+}
 let manifest = null;
 let hasArchive = false, archiveLoading = false;
 let monthKeys = [], monthCounts = [], liveMonths = new Set(), gapMonths = new Set();
@@ -506,12 +536,24 @@ async function pickMonth(m) {
 // ---- deck ---------------------------------------------------------------
 async function initDeck() {
   const { DeckGL, GeoJsonLayer } = deck;
+  zoomNow = viewFor(state.view).zoom;
   deckgl = new DeckGL({
     container: "map",
     initialViewState: viewFor(state.view),
     controller: true,
     layers: [],
     getTooltip: null,
+    // Which labels and border levels belong on screen is a function of zoom,
+    // so the view has to be able to trigger a redraw. Redrawing on every
+    // frame of a pan would be wasteful, so redraw only when the set of things
+    // that would render actually changes.
+    onViewStateChange: ({ viewState }) => {
+      zoomNow = viewState.zoom;
+      const sig = contextSignature(zoomNow);
+      if (sig === contextSig) return;
+      contextSig = sig;
+      draw();
+    },
   });
   // Flat land polygons instead of raster tiles: exact control over the
   // land/ocean contrast, real coastlines, and one less network dependency.
@@ -526,6 +568,24 @@ async function initDeck() {
       pickable: false,
     });
   } catch { landLayer = null; }
+
+  // Borders and labels are context, not data — a failure to load them should
+  // cost the map its place names, not its earthquakes.
+  try {
+    const bg = await (await fetch(manifest.borders || "borders.geojson")).json();
+    const byLevel = (lvl) => ({
+      type: "FeatureCollection",
+      features: bg.features.filter((f) => f.properties.lvl === lvl),
+    });
+    borders0 = byLevel(0);
+    borders1 = byLevel(1);
+  } catch { borders0 = borders1 = null; }
+
+  try {
+    placeLabels = await (await fetch(manifest.labels || "labels.json")).json();
+  } catch { placeLabels = null; }
+
+  contextSig = contextSignature(zoomNow);
 }
 
 // ---- the hot path --------------------------------------------------------
@@ -641,9 +701,33 @@ function renderLegendMags(minPx) {
 }
 
 function draw(alphaOverride) {
-  const { ScatterplotLayer } = deck;
+  const { ScatterplotLayer, GeoJsonLayer, TextLayer } = deck;
   const layers = [];
   if (landLayer) layers.push(landLayer);
+
+  // Borders sit between the land silhouette and the events, and are kept
+  // dimmer than the coastline on purpose. The premise of the map is that the
+  // earthquakes draw the plate boundaries; political lines are here to answer
+  // "which state is that", not to compete for attention.
+  if (borders0) {
+    layers.push(new GeoJsonLayer({
+      id: "borders-0", data: borders0,
+      stroked: true, filled: false,
+      getLineColor: [62, 78, 106, 210],
+      getLineWidth: 1, lineWidthUnits: "pixels", lineWidthMinPixels: 0.7,
+      pickable: false,
+    }));
+  }
+  if (borders1 && zoomNow >= STATE_LINE_ZOOM) {
+    layers.push(new GeoJsonLayer({
+      id: "borders-1", data: borders1,
+      stroked: true, filled: false,
+      getLineColor: [48, 62, 88, 190],
+      getLineWidth: 1, lineWidthUnits: "pixels", lineWidthMinPixels: 0.5,
+      pickable: false,
+    }));
+  }
+
   const scale = renderScale(gpu ? gpu.n : 0);
   renderLegendMags(scale.minPx);
 
@@ -718,6 +802,38 @@ function draw(alphaOverride) {
           `<span class="felt">${Math.round((Date.now() - p.time) / 6e4)} minutes ago</span>`;
       }),
     }));
+  }
+
+  // Labels last so nothing paints over them. Natural Earth ships a min/max
+  // zoom per name, so what shows at a given zoom is a cartographer's call
+  // rather than a threshold guessed here — country names at world zoom,
+  // states and provinces once the frame is regional.
+  if (placeLabels) {
+    const visible = placeLabels.filter((l) => labelVisible(l, zoomNow));
+    if (visible.length) {
+      layers.push(new TextLayer({
+        id: "labels", data: visible,
+        getPosition: (l) => l.p,
+        // Country names in caps, states in title case: hierarchy that survives
+        // being dimmed, which size and colour alone would not.
+        getText: (l) => (l.lvl === 0 ? l.n.toUpperCase() : l.n),
+        getSize: (l) => (l.lvl === 0 ? 11.5 : 10),
+        getColor: (l) => (l.lvl === 0 ? [166, 181, 207, 235] : [124, 140, 168, 225]),
+        sizeUnits: "pixels",
+        fontFamily: '"IBM Plex Mono", ui-monospace, monospace',
+        fontWeight: 500,
+        characterSet: "auto",
+        // An SDF halo in the ocean colour keeps names readable over the bright
+        // additive pileups without boxing them in.
+        fontSettings: { sdf: true, buffer: 8, radius: 12 },
+        outlineWidth: 3,
+        outlineColor: [11, 18, 32, 235],
+        getTextAnchor: "middle",
+        getAlignmentBaseline: "center",
+        pickable: false,
+        updateTriggers: { getText: visible.length, getSize: visible.length },
+      }));
+    }
   }
 
   deckgl.setProps({ layers });

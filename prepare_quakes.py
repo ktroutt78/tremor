@@ -141,6 +141,8 @@ def main():
         "parquet": qpath.name,
         "majors": mpath.name,
         "land": "land.geojson",
+        "borders": "borders.geojson",
+        "labels": "labels.json",
         "built_at": dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "coverage_start": quakes.TIME.min().strftime("%Y-%m-%dT%H:%M:%SZ"),
         "coverage_end": quakes.TIME.max().strftime("%Y-%m-%dT%H:%M:%SZ"),

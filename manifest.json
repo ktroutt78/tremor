@@ -151,5 +151,7 @@
     "2026-07": 745,
     "2026-08": 203
   },
-  "source": "USGS ComCat via fdsnws/event/1"
+  "source": "USGS ComCat via fdsnws/event/1",
+  "borders": "borders.geojson",
+  "labels": "labels.json"
 }

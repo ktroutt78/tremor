@@ -16,8 +16,11 @@ Live at **https://tremor.keithtroutt.com**
 | `quakes-YYYY-MM-DD.parquet` | global M4.5+ since 2015 — the decade archive |
 | `majors-YYYY-MM-DD.parquet` | global M7+ since 1900 — the great earthquakes |
 | `land.geojson` | Natural Earth 1:50m land polygons (the basemap) |
+| `borders.geojson` | country and state/province lines, one MultiLineString per level |
+| `labels.json` | place names + the zoom range Natural Earth recommends for each |
 | `prepare_quakes.py` | builds both Parquets + the manifest from USGS ComCat |
 | `prepare_land.py` | builds `land.geojson`; static, run once |
+| `prepare_borders.py` | builds `borders.geojson` + `labels.json`; static, run once |
 
 `DATA-TIERS.md` documents the freshness contract between the archive and the
 live feeds. `REVISIONS.md` is the build spec the current version was cut to.
