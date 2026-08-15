@@ -8,6 +8,17 @@ const EVENT_PAGE = "https://earthquake.usgs.gov/earthquakes/eventpage/";
 const $ = (id) => document.getElementById(id);
 const boot = (m) => ($("boot-msg").textContent = m);
 const REDUCED = matchMedia("(prefers-reduced-motion: reduce)").matches;
+// Touch devices never fire hover, so every hover-only affordance is dead on a
+// phone — which was the whole enrichment layer: place, felt reports, PAGER
+// alert, click-through.
+const IS_TOUCH = matchMedia("(hover: none)").matches;
+const isMobile = () => innerWidth <= 900;
+// Read from CSS so the sheet/timeline heights live in one place.
+const cssPx = (name, fallback) => {
+  const v = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+  const n = parseFloat(v);
+  return Number.isFinite(n) ? n : fallback;
+};
 
 // A hardcoded world zoom cuts whatever doesn't fit the viewport it was tuned
 // on — at zoom 1.9 that was ~80° of longitude and everything above ~55°N,
@@ -21,8 +32,14 @@ const invMercY = (f) =>
   (2 * Math.atan(Math.exp((0.5 - f) * 2 * Math.PI)) - Math.PI / 2) * 180 / Math.PI;
 
 function worldView() {
-  const w = Math.max(320, innerWidth - (innerWidth > 900 ? RAIL_W : 0));
-  const h = Math.max(240, innerHeight - TIMELINE_H);
+  // Desktop loses width to the rail; mobile loses height to the sheet and the
+  // timeline strip. Fitting against the wrong one puts the Aleutians back
+  // under the chrome.
+  const w = Math.max(320, innerWidth - (isMobile() ? 0 : RAIL_W));
+  const chrome = isMobile()
+    ? cssPx("--peek", 184) + cssPx("--tl-h", 76)
+    : TIMELINE_H;
+  const h = Math.max(240, innerHeight - chrome);
   const span = mercY(LAT_S) - mercY(LAT_N);
   const zoom = Math.min(Math.log2(w / TILE), Math.log2(h / (TILE * span)));
   return {
@@ -775,9 +792,8 @@ function draw(alphaOverride) {
       getLineColor: [226, 233, 245, 150],
       getLineWidth: 1, lineWidthUnits: "pixels",
       pickable: true,
-      onHover: (info) => tipHTML(info, (d) =>
-        `<div class="place">${d.place}</div><b>M${d.mag.toFixed(1)}</b> · ${d.year} · ` +
-        `${Math.round(d.depth)} km`),
+      onHover: (info) => tipHTML(info, majorHTML),
+      onClick: (info) => info.object && showTip(majorHTML(info.object), info.x, info.y),
     }));
   }
   // Past-hour events ring on top in every window — including the Hour
@@ -794,12 +810,9 @@ function draw(alphaOverride) {
       getLineColor: [255, 224, 102, 225],
       getLineWidth: 1.5, lineWidthUnits: "pixels",
       pickable: true,
-      onHover: (info) => tipHTML(info, (f) => {
-        const p = f.properties;
-        return `<div class="place">${p.place || "Location pending"}</div>` +
-          `<b>M${(p.mag ?? 0).toFixed(1)}</b> · ${Math.round(f.geometry.coordinates[2] ?? 0)} km deep<br/>` +
-          `<span class="felt">${Math.round((Date.now() - p.time) / 6e4)} minutes ago</span>`;
-      }),
+      onHover: (info) => tipHTML(info, hourHTML),
+      onClick: (info) => info.object &&
+        showTip(hourHTML(info.object), info.x, info.y, EVENT_PAGE + info.object.id),
     }));
   }
 
@@ -846,20 +859,50 @@ function draw(alphaOverride) {
 // ---- tooltips ------------------------------------------------------------
 const ALERT_COLOR = { green: "#3ec88a", yellow: "#ffe066", orange: "#ff9f45", red: "#ff5f4a" };
 
-function tipHTML({ x, y, object }, render) {
+const majorHTML = (d) =>
+  `<div class="place">${d.place}</div><b>M${d.mag.toFixed(1)}</b> · ${d.year} · ` +
+  `${Math.round(d.depth)} km`;
+
+const hourHTML = (f) => {
+  const p = f.properties;
+  return `<div class="place">${p.place || "Location pending"}</div>` +
+    `<b>M${(p.mag ?? 0).toFixed(1)}</b> · ${Math.round(f.geometry.coordinates[2] ?? 0)} km deep<br/>` +
+    `<span class="felt">${Math.round((Date.now() - p.time) / 6e4)} minutes ago</span>`;
+};
+
+function hideTip() {
   const el = $("tip");
-  if (!object) { el.style.display = "none"; return; }
-  el.style.display = "block";
-  el.style.left = Math.min(x + 16, innerWidth - 312) + "px";
-  el.style.top = Math.min(y + 16, innerHeight - 150) + "px";
-  el.innerHTML = render(object);
+  el.style.display = "none";
+  el.classList.remove("card");
 }
 
-function onEventHover({ index, x, y }) {
+// Desktop: a tip that follows the cursor. Touch: a docked card above the
+// sheet, tappable and explicitly dismissible, since there is no mouse-out.
+function showTip(html, x, y, link) {
   const el = $("tip");
-  if (index < 0 || !rows) { el.style.display = "none"; return; }
-  const r = rows.get(index);
-  if (!r) { el.style.display = "none"; return; }
+  el.style.display = "block";
+  if (IS_TOUCH || isMobile()) {
+    el.classList.add("card");
+    el.style.left = el.style.top = el.style.right = el.style.bottom = "";
+    el.innerHTML = html +
+      (link ? `<a class="close" href="${link}" target="_blank" rel="noopener">Open USGS event page ↗</a>` : "") +
+      `<span class="close" id="tip-close" role="button" tabindex="0">Close ✕</span>`;
+    const c = $("tip-close");
+    if (c) c.onclick = hideTip;
+  } else {
+    el.classList.remove("card");
+    el.style.left = Math.min(x + 16, innerWidth - 312) + "px";
+    el.style.top = Math.min(y + 16, innerHeight - 170) + "px";
+    el.innerHTML = html;
+  }
+}
+
+function tipHTML({ x, y, object }, render) {
+  if (!object) { if (!IS_TOUCH) hideTip(); return; }
+  showTip(render(object), x, y);
+}
+
+function eventHTML(r) {
   const when = new Date(Number(r.TIME));
   const felt = Number(r.FELT || 0);
   const alert = String(r.ALERT || "");
@@ -873,17 +916,26 @@ function onEventHover({ index, x, y }) {
   if (felt > 0) html += `<br/><span class="felt">${commas(felt)} people reported feeling this</span>`;
   if (Number(r.TSUNAMI)) html += `<br/><span class="felt">Tsunami evaluated</span>`;
   if (alert) html += `<br/><span class="chip" style="background:${ALERT_COLOR[alert] || "#7c8ca8"}">PAGER ${alert}</span>`;
-  html += `<br/><span class="hint">Click for the USGS event page</span>`;
-  el.style.display = "block";
-  el.style.left = Math.min(x + 16, innerWidth - 312) + "px";
-  el.style.top = Math.min(y + 16, innerHeight - 170) + "px";
-  el.innerHTML = html;
+  if (!IS_TOUCH) html += `<br/><span class="hint">Click for the USGS event page</span>`;
+  return html;
 }
 
-function onEventClick({ index }) {
-  if (index < 0 || !rows) return;
+function onEventHover({ index, x, y }) {
+  if (IS_TOUCH) return;                       // tap handles this instead
+  if (index < 0 || !rows) { hideTip(); return; }
   const r = rows.get(index);
-  if (r && r.ID) window.open(EVENT_PAGE + r.ID, "_blank", "noopener");
+  if (!r) { hideTip(); return; }
+  showTip(eventHTML(r), x, y);
+}
+
+function onEventClick({ index, x, y }) {
+  if (index < 0 || !rows) { hideTip(); return; }
+  const r = rows.get(index);
+  if (!r) return;
+  // On a phone the tap has to reveal the detail, not navigate away from it —
+  // the card carries the USGS link so leaving stays a deliberate second tap.
+  if (IS_TOUCH || isMobile()) showTip(eventHTML(r), x, y, EVENT_PAGE + r.ID);
+  else if (r.ID) window.open(EVENT_PAGE + r.ID, "_blank", "noopener");
 }
 
 // ---- animation: continuous cursor with a decay tail ----------------------
@@ -1027,6 +1079,22 @@ $("windows").querySelectorAll("button").forEach((b) => {
   b.onclick = () => setWindow(b.dataset.win);
 });
 
+// ---- mobile sheet --------------------------------------------------------
+function setSheet(open) {
+  document.body.classList.toggle("sheet-open", open);
+  $("sheet-handle").setAttribute("aria-expanded", String(open));
+  $("sheet-label").textContent = open ? "Hide filters" : "Filters & detail";
+  if (open) hideTip();                       // the card lives where the sheet expands
+}
+$("sheet-handle").onclick = () =>
+  setSheet(!document.body.classList.contains("sheet-open"));
+
+// Tapping a window button from the peek state shouldn't force a trip back to
+// the handle — the map is what you want to look at afterwards.
+$("windows").addEventListener("click", () => {
+  if (isMobile()) setSheet(false);
+});
+
 // The ticker is the most arresting number on the page; make it the shortcut
 // to the thing it counts.
 $("live").style.cursor = "pointer";
@@ -1041,7 +1109,7 @@ function applyMajorStep() {
   const step = MAJOR_STEPS[state.majorStep];
   $("b-majors").textContent = step.label;
   $("b-majors").setAttribute("aria-pressed", String(step.floor !== null));
-  if (step.floor === null) $("tip").style.display = "none";
+  if (step.floor === null) hideTip();
 }
 $("b-majors").onclick = async () => {
   state.majorStep = (state.majorStep + 1) % MAJOR_STEPS.length;
@@ -1072,8 +1140,13 @@ function setLegend(on, persist = true) {
   $("b-legend").setAttribute("aria-pressed", String(on));
   if (persist) { try { localStorage.setItem(LEGEND_KEY, on ? "1" : "0"); } catch {} }
 }
-let legendOn = true;
-try { legendOn = localStorage.getItem(LEGEND_KEY) !== "0"; } catch {}
+// A 168px panel over a phone screen is a lot of map to give up, so mobile
+// starts collapsed to the handle. An explicit choice still wins.
+let legendOn = !isMobile();
+try {
+  const stored = localStorage.getItem(LEGEND_KEY);
+  if (stored !== null) legendOn = stored !== "0";
+} catch {}
 setLegend(legendOn, false);
 
 $("b-legend").onclick = () => setLegend($("legend").hidden);

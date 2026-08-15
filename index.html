@@ -252,12 +252,107 @@
   @media (prefers-reduced-motion: reduce) {
     * { animation-duration: .001ms !important; transition-duration: .001ms !important; }
   }
+  /* ---------- mobile ----------
+     The old breakpoint only reflowed the rail from a sidebar to a top bar.
+     Beside the map that rail costs nothing; stacked above it, the two compete
+     for the same vertical space and the rail wins — on a 390x844 phone the
+     map was left with 203px. Here the rail becomes a bottom sheet that peeks
+     at --peek and expands on demand, so the map keeps the screen. */
+  #sheet-handle { display: none; }
+
   @media (max-width: 900px) {
-    #rail { width: 100%; height: auto; bottom: auto; max-height: 58%; border-right: none; border-bottom: 1px solid var(--rule); }
-    #timeline, #banner { left: 0; }
+    :root { --peek: 184px; --tl-h: 76px; }
+
+    #sheet-handle {
+      display: flex; align-items: center; justify-content: space-between;
+      width: 100%; flex: none; margin: 0 0 10px; padding: 12px 2px 10px;
+      background: transparent; border: none; border-bottom: 1px solid var(--rule);
+      border-radius: 0; color: var(--muted); min-height: 0;
+      font-family: "IBM Plex Mono", monospace; font-size: 10px;
+      letter-spacing: .16em; text-transform: uppercase;
+    }
+    #sheet-handle .grip {
+      position: absolute; top: 5px; left: 50%; transform: translateX(-50%);
+      width: 38px; height: 3px; border-radius: 2px; background: var(--rule);
+    }
+    #sheet-handle .chev { transition: transform .2s; }
+    body.sheet-open #sheet-handle .chev { transform: rotate(180deg); }
+
+    #rail {
+      top: auto; bottom: 0; left: 0; right: 0; width: 100%;
+      height: var(--peek); max-height: 86vh;
+      padding: 0 16px 16px; position: fixed;
+      border-right: none; border-top: 1px solid var(--rule);
+      overflow: hidden; transition: height .22s ease;
+      display: flex; flex-direction: column; align-items: stretch;
+    }
+    body.sheet-open #rail { height: 86vh; overflow-y: auto; }
+
+    /* Collapsed, the sheet shows only what a phone actually needs at a
+       glance: what just happened, and the time window. */
+    body:not(.sheet-open) #rail > *:not(#sheet-handle):not(#live):not(#h-window):not(#windows) {
+      display: none;
+    }
+
+    h1 { font-size: 32px; margin: 6px 0 10px; }
+    .standfirst { font-size: 13.5px; margin-bottom: 16px; }
+    .rule { margin: 14px 0; }
+
+    /* 44px minimum touch targets throughout */
+    button { min-height: 44px; padding: 11px 6px; font-size: 11px; }
+    #windows { flex-wrap: wrap; }
+    #windows button { flex: 1 1 28%; }
+    #depth { height: 44px; }
+    #depth div { font-size: 11px; }
+    #magwrap { min-height: 44px; }
+    input[type="range"] { height: 44px; }
+    #lg-close { width: 30px; height: 30px; min-height: 0; }
+    #sheet-handle { min-height: 0; }
+
+    /* The histogram stays as a sparkline but stops pretending to be tappable:
+       140 bars across 330px is 2.4px each, well under any touch target. The
+       window buttons do the selecting instead. */
+    #timeline {
+      left: 0; right: 0; bottom: var(--peek); height: var(--tl-h);
+      padding: 8px 14px 6px;
+    }
+    body.sheet-open #timeline { display: none; }
+    #bars { height: 28px; pointer-events: none; }
+    .tl-axis, #tl-lab, #cursor { display: none; }
+    .tl-when { font-size: 20px; }
+    #tl-clear { min-height: 0; padding: 6px 10px; }
+
+    #banner { left: 0; font-size: 10.5px; padding: 8px 12px; }
     #perf { display: none; }
-    #legend { width: 178px; right: 10px; bottom: 160px; font-size: 9.5px; }
-    #legend-show { right: 10px; bottom: 160px; }
+
+    /* Out of the map's way: top-right, above the timeline and the sheet. */
+    #legend {
+      width: 168px; right: 8px; top: 8px; bottom: auto;
+      font-size: 9.5px; padding: 10px 11px 9px; max-height: 62vh; overflow-y: auto;
+    }
+    #legend-show { right: 8px; top: 8px; bottom: auto; padding: 10px 12px; }
+
+    /* Touch has no hover, so the tooltip becomes a dismissible card docked
+       above the sheet rather than something that follows a cursor. */
+    #tip.card {
+      left: 12px; right: 12px; top: auto; max-width: none;
+      bottom: calc(var(--peek) + var(--tl-h) + 10px);
+      pointer-events: auto; font-size: 11.5px; padding: 12px 13px;
+    }
+    #tip .close {
+      display: block; margin-top: 9px; padding-top: 8px;
+      border-top: 1px solid var(--rule); color: var(--muted);
+      letter-spacing: .14em; text-transform: uppercase; font-size: 10px;
+    }
+    #tip a { color: var(--d1); }
+  }
+
+  @media (max-width: 900px) and (orientation: landscape) {
+    /* A phone on its side has no vertical room to give away. */
+    :root { --peek: 118px; --tl-h: 0px; }
+    #timeline { display: none; }
+    #rail { max-height: 92vh; }
+    body.sheet-open #rail { height: 92vh; }
   }
 </style>
 
@@ -265,6 +360,11 @@
 <div id="banner"></div>
 
 <aside id="rail">
+  <button id="sheet-handle" aria-expanded="false" aria-controls="rail">
+    <span class="grip"></span>
+    <span id="sheet-label">Filters &amp; detail</span>
+    <span class="chev">▲</span>
+  </button>
   <div class="eyebrow" id="eyebrow">USGS ANSS · Queried client-side</div>
   <h1>The ground<br />is <span class="hot">never</span><br />still.</h1>
   <p class="standfirst" id="standfirst">
@@ -282,7 +382,7 @@
 
   <div class="rule"></div>
 
-  <h2>Time window <span class="sel" id="win-sel"></span></h2>
+  <h2 id="h-window">Time window <span class="sel" id="win-sel"></span></h2>
   <div class="btns" id="windows">
     <button data-win="hour">Hour</button>
     <button data-win="day">Day</button>
