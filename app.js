@@ -45,7 +45,11 @@ function worldView() {
   return {
     longitude: -40,
     latitude: invMercY((mercY(LAT_S) + mercY(LAT_N)) / 2),
-    zoom: Math.max(0.2, zoom - 0.08),   // a hair of margin
+    // No margin. repeat:true (needed so the Ring of Fire doesn't end in black
+    // at the antimeridian) fills any slack with a second copy of the world, so
+    // a "hair of margin" here showed Alaska twice down both edges. Fitting
+    // exactly leaves nothing for the repeat to draw into.
+    zoom: Math.max(0.2, zoom),
     pitch: 0, bearing: 0,
   };
 }
@@ -68,13 +72,22 @@ const depthColor = (d) => {
   return BANDS[4].c;
 };
 
-// Radius in PIXELS, not metres. An epicentre is a point — the circle is a
-// symbol, not a footprint — and a metre radius resizes with every zoom,
-// which makes a legend impossible to keep honest. Monotonic in energy, but
-// the exponent is compressed for legibility: true energy scaling (10^1.5M)
-// would put an M9 some 30,000x an M4 and there is no usable range in that.
-const MAG_R = (m) => 0.103 * Math.pow(10, m * 0.237);
-const LEGEND_MAGS = [5, 6.5, 8];
+/* Radius in PIXELS, not metres. An epicentre is a point — the circle is a
+ * symbol, not a footprint — and a metre radius resizes with every zoom, which
+ * makes a legend impossible to keep honest.
+ *
+ * Linear above a threshold, not exponential. Energy really is exponential in
+ * magnitude, but the exponent here was already compressed so far (10^0.20m
+ * against a true 10^0.75m) that it had stopped representing energy and was
+ * only buying accelerating steps — M7→M8 jumped 7px while M4→M5 moved 2px.
+ * A straight line anchored near zero at M3.5 gives an even step per whole
+ * magnitude AND a wider big-to-small ratio than the curve it replaces. */
+const MAG_BASE = 0.6, MAG_SLOPE = 2.0, MAG_ZERO = 3.5;
+const MAG_R = (m) => MAG_BASE + MAG_SLOPE * Math.max(0, m - MAG_ZERO);
+// Even steps mean the ramp can start where the data does. Below MAG_ZERO the
+// line is flat by design — those magnitudes only exist in the Hour window and
+// nothing is gained by giving sub-pixel differences to sub-pixel dots.
+const LEGEND_MAGS = [4, 5, 6, 7, 8];
 
 const MAJOR_STEPS = [
   { floor: 8.0, label: "M8+ · 100" },
@@ -90,8 +103,12 @@ let db = null, conn = null, deckgl = null, landLayer = null;
 // Political context for the basemap. Borders split by admin level at load so
 // each renders as its own flat stroke; labels stay raw because which ones are
 // visible depends on the live zoom.
-let borders0 = null, borders1 = null, placeLabels = null;
+let borders0 = null, borders1 = null, placeLabels = null, landData = null;
+let cityLabels = null, cityLoading = false;
 let zoomNow = 0, contextSig = "";
+// Full view state, not just zoom: decluttering has to project lon/lat to
+// screen pixels, which needs centre and viewport size too.
+let viewNow = null;
 
 // Above this zoom the frame is regional enough that state and province lines
 // orient rather than clutter. Below it, country outlines carry the map.
@@ -104,17 +121,111 @@ const STATE_LINE_ZOOM = 3.2;
 // are something you zoom in to get rather than something you dismiss.
 const LABEL_MIN_ZOOM = 2.5;
 
-/** NE's max_label is deliberately ignored — it assumes city labels take over at
- *  high zoom, and this map has none, so honouring it makes names vanish exactly
- *  when someone zooms in to read them. Off-viewport labels cost nothing. */
-const labelVisible = (l, z) => z >= LABEL_MIN_ZOOM && z >= l.min;
+/* NE's max_label was ignored on the grounds that it assumes city labels take
+ * over at high zoom and this map had none. It has 7,342 now, so the
+ * assumption holds and the bound is honoured again.
+ *
+ * max_label alone isn't enough though: the USA's is 5.7, so "USA" would still
+ * sit across a frame showing Montana and Minnesota. Country names exist to
+ * orient you until something finer does, and state labels start at 3.5. Past
+ * that a country name is just a word in the middle of the map. */
+const COUNTRY_MAX_ZOOM = 4.0;
+const labelVisible = (l, z) =>
+  z >= LABEL_MIN_ZOOM && z >= l.min &&
+  (l.lvl !== 0 || z <= Math.min(l.max, COUNTRY_MAX_ZOOM));
+
+/* Towns. 67.8% of events already name their distance from one ("48 km W of
+ * Illapel, Chile"), but only in a tooltip — you had to interrogate each dot to
+ * learn whether it was near anybody. Cities on the map answer that at a
+ * glance. Gated on Natural Earth's own min_zoom, so a town appears when a
+ * cartographer decided it earns the space. */
+const CITY_MIN_ZOOM = 4;
+const cityVisible = (c, z) => z >= CITY_MIN_ZOOM && z >= c.z;
+
+/* Terrain. Natural Earth 1:50m is a coastline and nothing else — perfect at
+ * world zoom, empty at city zoom, which is exactly where the map felt flat.
+ * Raster tiles fade in once the view is regional, so the clean silhouette
+ * survives where it works and real land shows up where it's needed. Labels
+ * stay ours (dark_nolabels), so the typography doesn't fight itself. */
+const TILE_FADE_FROM = 4.6, TILE_FADE_TO = 6.2;
+// Additive weight for the dark hillshade. At 0.35: ocean 71, flat land 41,
+// shadowed land 18 — a 2.3x internal contrast on land, water still lighter.
+const HILLSHADE_STRENGTH = 0.35;
+/* Overlays on a map, not objects in a scene: they opt out of depth testing and
+ * paint in list order. Harmless with a flat basemap, and it keeps the layer
+ * stack honest if elevation is ever tried again. */
+const FLAT = { parameters: { depthCompare: "always" } };
+
+/* Type. SDF was the wrong tool here and was making things worse: it renders
+ * one atlas at fontSize and scales it, which is right for text that zooms and
+ * wrong for text pinned to 9-12px. At fontSize 128 an 8.5px label was a 7.5x
+ * downscale through a distance field — soft by construction.
+ *
+ * A plain atlas at roughly 2x the display size lands ~1:1 on a retina panel,
+ * which is as crisp as canvas text gets. The trade is that outlineWidth is
+ * SDF-only, so contrast comes from a background plate instead of a halo. */
+const LABEL_FONT = {
+  fontFamily: '"IBM Plex Mono", ui-monospace, monospace',
+  fontWeight: 500,
+  characterSet: "auto",
+  fontSettings: { sdf: false, fontSize: 26 },
+  background: true,
+  getBackgroundColor: [10, 16, 28, 170],
+  backgroundPadding: [4, 2, 4, 2],
+};
+const tileOpacity = (z) =>
+  Math.max(0, Math.min(1, (z - TILE_FADE_FROM) / (TILE_FADE_TO - TILE_FADE_FROM)));
+
+/* Label decluttering, done here rather than with CollisionFilterExtension.
+ * That extension has failed twice on this layer — silently inert without
+ * collisionTestProps, and with it, dropping every label instead of thinning
+ * them. This is a greedy screen-space pass instead: project each candidate,
+ * walk them in priority order, and keep one only if its box is still clear.
+ * Highest priority wins the spot, so a big city beats the town next to it.
+ * At a few thousand candidates the cost is trivial and it is debuggable. */
+function declutter(items) {
+  const { WebMercatorViewport } = deck;
+  const el = $("map");
+  if (!viewNow || !el?.clientWidth) return items;
+  let vp;
+  try {
+    vp = new WebMercatorViewport({
+      ...viewNow, width: el.clientWidth, height: el.clientHeight,
+    });
+  } catch { return items; }
+
+  const placed = [];
+  const kept = [];
+  // Priority descending: whoever asks first gets the space.
+  for (const it of [...items].sort((a, b) => b.pri - a.pri)) {
+    const p = vp.project(it.p);
+    const [x, y] = p;
+    if (!Number.isFinite(x) || !Number.isFinite(y)) continue;
+    if (x < -200 || y < -60 || x > vp.width + 200 || y > vp.height + 60) continue;
+    // Monospace, so width is predictable without measuring text.
+    const w = it.n.length * it.size * 0.62 + 12;
+    const h = it.size * 1.6;
+    const left = it.anchor === "middle" ? x - w / 2 : x + 4;
+    const box = [left, y - h / 2, left + w, y + h / 2];
+    const hit = placed.some((b) =>
+      box[0] < b[2] && box[2] > b[0] && box[1] < b[3] && box[3] > b[1]);
+    if (hit) continue;
+    placed.push(box);
+    kept.push(it);
+  }
+  return kept;
+}
 
 /** What the context layers would render at this zoom — used to skip redraws. */
 function contextSignature(z) {
   if (!placeLabels) return "";
   let n = 0;
   for (const l of placeLabels) if (labelVisible(l, z)) n++;
-  return `${n}|${z >= STATE_LINE_ZOOM ? 1 : 0}`;
+  let c = 0;
+  if (cityLabels) for (const t of cityLabels) if (cityVisible(t, z)) c++;
+  // Tile opacity is continuous, so bucket it — otherwise every pixel of zoom
+  // is a redraw.
+  return `${n}|${c}|${z >= STATE_LINE_ZOOM ? 1 : 0}|${Math.round(tileOpacity(z) * 12)}`;
 }
 let manifest = null;
 let hasArchive = false, archiveLoading = false;
@@ -553,8 +664,14 @@ async function pickMonth(m) {
 async function initDeck() {
   const { DeckGL, GeoJsonLayer } = deck;
   zoomNow = viewFor(state.view).zoom;
+  const { MapView } = deck;
+  viewNow = viewFor(state.view);
   deckgl = new DeckGL({
     container: "map",
+    // repeat:true wraps the world horizontally. Without it any view centred
+    // past ~120°E runs out of map at the antimeridian and the Ring of Fire —
+    // the one view that straddles it — ends in black halfway across the frame.
+    views: new MapView({ repeat: true }),
     initialViewState: viewFor(state.view),
     controller: true,
     layers: [],
@@ -565,25 +682,19 @@ async function initDeck() {
     // that would render actually changes.
     onViewStateChange: ({ viewState }) => {
       zoomNow = viewState.zoom;
+      viewNow = viewState;
+      loadCities();                       // no-op until the view is regional
       const sig = contextSignature(zoomNow);
       if (sig === contextSig) return;
       contextSig = sig;
       draw();
     },
   });
-  // Flat land polygons instead of raster tiles: exact control over the
-  // land/ocean contrast, real coastlines, and one less network dependency.
+  // Land is fetched here but the layer is built per-draw in draw(), because
+  // its opacity has to fall as the raster tiles rise.
   try {
-    const land = await (await fetch(manifest.land || "land.geojson")).json();
-    landLayer = new GeoJsonLayer({
-      id: "land", data: land,
-      filled: true, stroked: true,
-      getFillColor: [26, 35, 51],
-      getLineColor: [45, 58, 82],
-      getLineWidth: 1, lineWidthUnits: "pixels", lineWidthMinPixels: 0.6,
-      pickable: false,
-    });
-  } catch { landLayer = null; }
+    landData = await (await fetch(manifest.land || "land.geojson")).json();
+  } catch { landData = null; }
 
   // Borders and labels are context, not data — a failure to load them should
   // cost the map its place names, not its earthquakes.
@@ -601,7 +712,25 @@ async function initDeck() {
     placeLabels = await (await fetch(manifest.labels || "labels.json")).json();
   } catch { placeLabels = null; }
 
+  loadCities();
   contextSig = contextSignature(zoomNow);
+}
+
+/* 357 KB of towns is worth it once you are looking at a region and worthless
+ * at world zoom, so it is fetched the first time the view crosses into range —
+ * the same lazy contract the archive uses. */
+async function loadCities() {
+  if (cityLabels || cityLoading || zoomNow < CITY_MIN_ZOOM) return;
+  cityLoading = true;
+  try {
+    cityLabels = await (await fetch(manifest.cities || "cities.json")).json();
+    contextSig = contextSignature(zoomNow);
+    draw();
+  } catch {
+    cityLabels = null;      // context, not data — the map still works without it
+  } finally {
+    cityLoading = false;
+  }
 }
 
 // ---- the hot path --------------------------------------------------------
@@ -639,6 +768,7 @@ async function refresh() {
   const colors = new Uint8Array(n * 4);      // RGBA — alpha is animated
   const radii = new Float32Array(n);
   const times = new Float64Array(n);
+  const magMul = renderScale(n).mul;
 
   for (let i = 0; i < n; i++) {
     positions[i * 2] = lon[i];
@@ -646,7 +776,7 @@ async function refresh() {
     const c = depthColor(dep[i]);
     colors[i * 4] = c[0]; colors[i * 4 + 1] = c[1];
     colors[i * 4 + 2] = c[2]; colors[i * 4 + 3] = 255;
-    radii[i] = MAG_R(mag[i]);
+    radii[i] = MAG_R(mag[i]) * magMul;
     times[i] = Number(tms[i]);
   }
   const buildMs = performance.now() - t0 - qMs;
@@ -691,35 +821,121 @@ async function refresh() {
 // At five events nothing accumulates, and an energy-scaled M2.0 is 4.7 km,
 // which is a fifth of a pixel at world zoom. So both alpha and the pixel
 // floor have to scale with how much is actually on screen.
+// Density scales the WHOLE ramp, not just its floor. A radiusMinPixels floor
+// clamped everything below it to one size — in the 30-day view M4.5, M5.0 and
+// M5.5 all rendered at 2.2px, so the encoding died exactly where most events
+// live. A multiplier keeps every magnitude ratio intact at every density.
 function renderScale(n) {
-  if (n > 20000) return { opacity: 0.18, minPx: 0.8 };
-  if (n > 2000)  return { opacity: 0.34, minPx: 1.3 };
-  if (n > 200)   return { opacity: 0.6,  minPx: 2.2 };
-  if (n > 20)    return { opacity: 0.85, minPx: 3 };
-  return { opacity: 1, minPx: 4 };
+  if (n > 20000) return { opacity: 0.18, mul: 0.42 };
+  if (n > 2000)  return { opacity: 0.34, mul: 0.62 };
+  if (n > 200)   return { opacity: 0.60, mul: 0.85 };
+  if (n > 20)    return { opacity: 0.85, mul: 1.00 };
+  return { opacity: 1, mul: 1.15 };
 }
 
-// The legend is drawn from MAG_R and the same pixel floor the layer uses, so
-// a swatch is the size the map actually renders — not an approximation of it.
-function renderLegendMags(minPx) {
+// The legend is drawn from MAG_R and the same multiplier the layer uses, so a
+// swatch is the size the map actually renders — not an approximation of it.
+function renderLegendMags(mul) {
   const el = $("lg-mags");
   if (!el) return;
+  const last = LEGEND_MAGS.at(-1);
   el.innerHTML = LEGEND_MAGS.map((m) => {
-    const d = Math.round(Math.max(minPx, MAG_R(m)) * 2);
+    // True size, floored at 2px only so the smallest still register as marks
+    // rather than vanishing — the ramp's whole point is that they are tiny.
+    const d = Math.max(2, Math.round(MAG_R(m) * mul * 2));
     return `<div class="lg-mag"><i style="width:${d}px;height:${d}px"></i>` +
-           `<span>M${m}</span></div>`;
+           `<span>${m}${m === last ? "+" : ""}</span></div>`;
   }).join("");
+  const step = Math.round(MAG_SLOPE * mul * 2);
   $("lg-magcap").innerHTML =
-    `Drawn at a fixed pixel size, so these hold at every zoom. ` +
-    (minPx > MAG_R(LEGEND_MAGS[0])
-      ? `Sparse views raise a ${minPx}px floor, so the smallest are levelled up.`
-      : `Monotonic in energy, compressed to stay legible.`);
+    `An even ${step}px per whole magnitude, so steps read the same all the way ` +
+    `up. Dense views shrink the ramp together, never just its smallest. Under ` +
+    `M4.5 shows only in the Hour window, at the minimum dot.`;
 }
 
 function draw(alphaOverride) {
-  const { ScatterplotLayer, GeoJsonLayer, TextLayer } = deck;
+  const { ScatterplotLayer, GeoJsonLayer, TextLayer, TileLayer, BitmapLayer } = deck;
   const layers = [];
-  if (landLayer) layers.push(landLayer);
+  const tOp = tileOpacity(zoomNow);
+
+  // Natural Earth 1:50m is the basemap until the raster tiles take over, and
+  // then it has to get out of the way. Left drawing underneath semi-opaque
+  // tiles it bleeds through as a second, coarser coastline offset from the
+  // real one — most obvious in the Aleutians, where 1:50m renders the chain as
+  // blobs that do not line up with the islands in the tile beneath.
+  if (landData && tOp < 0.99) {
+    layers.push(new GeoJsonLayer({
+      id: "land", data: landData,
+      filled: true, stroked: true,
+      getFillColor: [26, 35, 51],
+      getLineColor: [45, 58, 82],
+      getLineWidth: 1, lineWidthUnits: "pixels", lineWidthMinPixels: 0.6,
+      opacity: 1 - tOp,
+      pickable: false,
+      updateTriggers: { opacity: Math.round(tOp * 12) },
+    }));
+  }
+
+  // Streets and water, once the silhouette has run out of things to say.
+  //
+  // Earthquakes are faults, and faults build mountains — relief is the
+  // mechanism behind the dots, not decoration. Three attempts failed first:
+  //   1. TerrainLayer over AWS terrarium — s3.amazonaws.com sends no
+  //      access-control-allow-origin, so the browser cannot read the tiles as
+  //      data and the mesh stays flat however it is lit.
+  //   2. Esri World Hillshade, additive — light-on-light (ocean #fcfcfc),
+  //      so it added ~250 everywhere and the map turned white.
+  //   3. The same source multiplied — right blend, but CARTO's land is
+  //      #090909 and 9 x 0.45 is 4. Invisible.
+  // World_Hillshade_DARK is the one that works: its ocean is a flat 95 and
+  // land runs 25 (shadow) to 108 (ridge), so terrain deviates DOWNWARD from a
+  // baseline instead of upward from white. Added at HILLSHADE_STRENGTH the
+  // land gains internal contrast while staying darker than water, which is
+  // the relationship DarkMatter already uses.
+  //
+  if (tOp > 0) {
+    layers.push(new TileLayer({
+      id: "terrain",
+      data: "https://a.basemaps.cartocdn.com/dark_nolabels/{z}/{x}/{y}.png",
+      minZoom: 0, maxZoom: 19, tileSize: 256,
+      renderSubLayers: (props) => {
+        const { boundingBox: b } = props.tile;
+        return new BitmapLayer(props, {
+          data: null, image: props.data,
+          bounds: [b[0][0], b[0][1], b[1][0], b[1][1]],
+          opacity: tOp,
+          // CARTO DarkMatter is neutral grey; the rest of the page is navy.
+          // Multiplying the raster pushes it onto the same hue so the basemap
+          // does not shift colour as it crossfades in.
+          tintColor: [150, 186, 255],
+        });
+      },
+      updateTriggers: { renderSubLayers: Math.round(tOp * 12) },
+    }));
+
+    layers.push(new TileLayer({
+      id: "hillshade",
+      data: "https://services.arcgisonline.com/arcgis/rest/services/Elevation/" +
+            "World_Hillshade_Dark/MapServer/tile/{z}/{y}/{x}",
+      minZoom: 0, maxZoom: 16, tileSize: 256,
+      renderSubLayers: (props) => {
+        const { boundingBox: b } = props.tile;
+        return new BitmapLayer(props, {
+          data: null, image: props.data,
+          bounds: [b[0][0], b[0][1], b[1][0], b[1][1]],
+          opacity: tOp * HILLSHADE_STRENGTH,
+          tintColor: [150, 186, 255],
+          parameters: {
+            blendColorOperation: "add",
+            blendColorSrcFactor: "src-alpha",
+            blendColorDstFactor: "one",
+          },
+        });
+      },
+      updateTriggers: { renderSubLayers: Math.round(tOp * 12) },
+    }));
+
+  }
 
   // Borders sit between the land silhouette and the events, and are kept
   // dimmer than the coastline on purpose. The premise of the map is that the
@@ -727,7 +943,8 @@ function draw(alphaOverride) {
   // "which state is that", not to compete for attention.
   if (borders0) {
     layers.push(new GeoJsonLayer({
-      id: "borders-0", data: borders0,
+      id: "borders-0",
+      ...FLAT, data: borders0,
       stroked: true, filled: false,
       getLineColor: [62, 78, 106, 210],
       getLineWidth: 1, lineWidthUnits: "pixels", lineWidthMinPixels: 0.7,
@@ -736,7 +953,8 @@ function draw(alphaOverride) {
   }
   if (borders1 && zoomNow >= STATE_LINE_ZOOM) {
     layers.push(new GeoJsonLayer({
-      id: "borders-1", data: borders1,
+      id: "borders-1",
+      ...FLAT, data: borders1,
       stroked: true, filled: false,
       getLineColor: [48, 62, 88, 190],
       getLineWidth: 1, lineWidthUnits: "pixels", lineWidthMinPixels: 0.5,
@@ -745,7 +963,7 @@ function draw(alphaOverride) {
   }
 
   const scale = renderScale(gpu ? gpu.n : 0);
-  renderLegendMags(scale.minPx);
+  renderLegendMags(scale.mul);
 
   if (gpu && gpu.n) {
     layers.push(new ScatterplotLayer({
@@ -769,7 +987,9 @@ function draw(alphaOverride) {
         depthCompare: "always",
       },
       radiusUnits: "pixels",
-      radiusMinPixels: scale.minPx,
+      // Anti-vanish only. Anything higher flattens the bottom of the ramp,
+      // which is what made M4.5 and M5.5 indistinguishable.
+      radiusMinPixels: 0.5,
       radiusMaxPixels: 60,
       opacity: scale.opacity,
       stroked: false,
@@ -783,6 +1003,7 @@ function draw(alphaOverride) {
   if (majorsRows.length) {
     layers.push(new ScatterplotLayer({
       id: "majors",
+      ...FLAT,
       data: majorsRows,
       getPosition: (d) => d.position,
       getRadius: (d) => 5 + (d.mag - 7) * 6,
@@ -802,6 +1023,7 @@ function draw(alphaOverride) {
   if (hourFeatures.length) {
     layers.push(new ScatterplotLayer({
       id: "past-hour",
+      ...FLAT,
       data: hourFeatures,
       getPosition: (f) => [f.geometry.coordinates[0], f.geometry.coordinates[1]],
       getRadius: (f) => Math.max(7, 5 + (f.properties.mag ?? 0) * 2),
@@ -820,38 +1042,94 @@ function draw(alphaOverride) {
   // zoom per name, so what shows at a given zoom is a cartographer's call
   // rather than a threshold guessed here — country names at world zoom,
   // states and provinces once the frame is regional.
-  if (placeLabels) {
-    const visible = placeLabels.filter((l) => labelVisible(l, zoomNow));
-    if (visible.length) {
-      layers.push(new TextLayer({
-        id: "labels", data: visible,
-        getPosition: (l) => l.p,
-        // Country names in caps, states in title case: hierarchy that survives
-        // being dimmed, which size and colour alone would not.
-        getText: (l) => (l.lvl === 0 ? l.n.toUpperCase() : l.n),
-        getSize: (l) => (l.lvl === 0 ? 11.5 : 10),
-        getColor: (l) => (l.lvl === 0 ? [166, 181, 207, 235] : [124, 140, 168, 225]),
-        sizeUnits: "pixels",
-        fontFamily: '"IBM Plex Mono", ui-monospace, monospace',
-        fontWeight: 500,
-        characterSet: "auto",
-        // An SDF halo in the ocean colour keeps names readable over the bright
-        // additive pileups without boxing them in.
-        fontSettings: { sdf: true, buffer: 8, radius: 12 },
-        outlineWidth: 3,
-        outlineColor: [11, 18, 32, 235],
-        getTextAnchor: "middle",
-        getAlignmentBaseline: "center",
+  // Cities sit under the admin labels in the hierarchy — a dot for the exact
+  // spot, the name offset beside it so the two don't overprint.
+  // Cities and admin names are decluttered together in one pass — a state name
+  // and a city name that overlap is a real conflict, and arbitrating each list
+  // separately would leave it unresolved.
+  const cityCands = (cityLabels || [])
+    .filter((c) => cityVisible(c, zoomNow))
+    .map((c) => ({
+      ...c, kind: "city", anchor: "start",
+      size: c.t === 2 ? 12.5 : c.t === 1 ? 11 : 10,
+      pri: c.t === 2 ? 60 : c.t === 1 ? 35 : 15,
+    }));
+  const adminCands = (placeLabels || [])
+    .filter((l) => labelVisible(l, zoomNow))
+    .map((l) => ({
+      ...l, kind: "admin", anchor: "middle",
+      size: l.lvl === 0 ? 12.5 : 11.5,
+      pri: l.lvl === 0 ? 90 : 25,
+    }));
+  const survivors = declutter([...cityCands, ...adminCands]);
+  const townLabels = survivors.filter((s) => s.kind === "city");
+  const adminLabels = survivors.filter((s) => s.kind === "admin");
+
+  if (cityLabels) {
+    // Dots for every town in range; names only for the ones that won space.
+    const towns = cityLabels.filter((c) => cityVisible(c, zoomNow));
+    if (towns.length) {
+      layers.push(new ScatterplotLayer({
+        id: "city-dots",
+        ...FLAT, data: towns,
+        getPosition: (c) => c.p,
+        getRadius: (c) => (c.t === 2 ? 2.6 : c.t === 1 ? 2 : 1.5),
+        radiusUnits: "pixels",
+        filled: true, stroked: true,
+        getFillColor: [206, 218, 238, 210],
+        getLineColor: [11, 18, 32, 220],
+        getLineWidth: 1, lineWidthUnits: "pixels",
         pickable: false,
-        // Natural Earth's anchors are per-country, not per-frame, so at some
-        // zooms neighbours still land on top of each other (Israel over
-        // Jordan). CollisionFilterExtension is the documented fix and ships in
-        // this bundle, but wiring it to this layer changed nothing on screen,
-        // so it is left out rather than carried as a dead render pass.
-        updateTriggers: { getText: visible.length, getSize: visible.length },
       }));
     }
   }
+  if (townLabels.length) {
+    layers.push(new TextLayer({
+      id: "city-labels",
+      ...FLAT, data: townLabels,
+      getPosition: (c) => c.p,
+      getText: (c) => c.n,
+      // Sizes kept at or under the 26px atlas so glyphs are never upscaled.
+      getSize: (c) => c.size,
+      getColor: (c) => (c.t === 2 ? [214, 226, 245, 255]
+                      : c.t === 1 ? [176, 191, 216, 245]
+                                  : [146, 162, 190, 230]),
+      sizeUnits: "pixels",
+      ...LABEL_FONT,
+      getTextAnchor: "start",
+      getAlignmentBaseline: "center",
+      getPixelOffset: (c) => [c.t === 2 ? 7 : 6, 0],
+      pickable: false,
+      updateTriggers: { getText: townLabels.length, getSize: townLabels.length },
+    }));
+  }
+
+  if (adminLabels.length) {
+    layers.push(new TextLayer({
+      id: "labels",
+      ...FLAT, data: adminLabels,
+      getPosition: (l) => l.p,
+      // Country names in caps, states in title case: hierarchy that survives
+      // being dimmed, which size and colour alone would not.
+      getText: (l) => (l.lvl === 0 ? l.n.toUpperCase() : l.n),
+      getSize: (l) => l.size,
+      getColor: (l) => (l.lvl === 0 ? [196, 210, 234, 250] : [162, 178, 206, 240]),
+      sizeUnits: "pixels",
+      ...LABEL_FONT,
+      getTextAnchor: "middle",
+      getAlignmentBaseline: "center",
+      pickable: false,
+      updateTriggers: { getText: adminLabels.length, getSize: adminLabels.length },
+    }));
+  }
+
+  // Paint order is declared, not implied by where a push happens to sit in
+  // this function. Everything seismic rides on top of every basemap and label
+  // layer — the earthquakes are the subject and nothing may bury them.
+  const ORDER = ["land", "terrain", "hillshade", "borders-0", "borders-1",
+                 "city-dots", "city-labels", "labels",
+                 "events", "majors", "past-hour"];
+  layers.sort((a, b) => ORDER.indexOf(a.id) - ORDER.indexOf(b.id));
 
   deckgl.setProps({ layers });
 }

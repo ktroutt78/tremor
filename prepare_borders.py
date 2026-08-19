@@ -44,7 +44,16 @@ SOURCES = {
     "lines_1":  "ne_50m_admin_1_states_provinces_lines.geojson",
     "labels_0": "ne_50m_admin_0_countries.geojson",
     "labels_1": "ne_50m_admin_1_states_provinces.geojson",
+    # 1:10m for towns specifically. The 1:50m set carries 1,251 places and
+    # only nine in California, which is not enough to answer "how far is that
+    # from anywhere". 1:10m carries 7,342 and 48.
+    "cities":   "ne_10m_populated_places_simple.geojson",
 }
+
+CITIES_OUT = HERE / "cities.json"
+# Population tiers, used only to size the label. Three is enough to separate
+# "a city you have heard of" from "a town that tells you where you are".
+TIER = ((1_000_000, 2), (200_000, 1))
 
 
 def fetch(name):
@@ -122,10 +131,37 @@ def main():
     LABELS_OUT.write_text(json.dumps(labels, separators=(",", ":"),
                                      ensure_ascii=False))
 
+    # ---- cities -----------------------------------------------------------
+    # Separate file, loaded only once the view is regional. 7,342 towns is
+    # ~350 KB, and a visitor who never zooms past the world view should not
+    # pay for it. Gating uses NE's own min_zoom, so a town appears when a
+    # cartographer decided it earns the space — same rule as the admin labels.
+    cities = []
+    for p in (f["properties"] for f in fetch(SOURCES["cities"])["features"]):
+        if p.get("longitude") is None or p.get("latitude") is None:
+            continue
+        pop = p.get("pop_max") or 0
+        tier = next((t for cut, t in TIER if pop >= cut), 0)
+        cities.append({
+            "n": p.get("nameascii") or p["name"],
+            # 2dp is ~1 km, which is finer than a label anchor needs.
+            "p": [round(p["longitude"], 2), round(p["latitude"], 2)],
+            "z": p.get("min_zoom") or 7,
+            "t": tier,
+        })
+    cities.sort(key=lambda c: c["z"])
+    CITIES_OUT.write_text(json.dumps(cities, separators=(",", ":"),
+                                     ensure_ascii=False))
+
     n0 = sum(1 for l in labels if l["lvl"] == 0)
     print(f"\n{BORDERS_OUT.name}  {BORDERS_OUT.stat().st_size/1e6:.2f} MB")
     print(f"{LABELS_OUT.name}  {LABELS_OUT.stat().st_size/1e3:.1f} KB "
           f"({n0} countries, {len(labels)-n0} states/provinces)")
+    print(f"{CITIES_OUT.name}  {CITIES_OUT.stat().st_size/1e3:.1f} KB "
+          f"({len(cities):,} places; "
+          f"{sum(1 for c in cities if c['t'] == 2)} over 1M people)")
+    for z in (4, 5, 6, 7):
+        print(f"    visible at z{z}: {sum(1 for c in cities if c['z'] <= z):,}")
 
 
 if __name__ == "__main__":

@@ -46,12 +46,18 @@
 #                reproduces in production.
 #   style-src    'unsafe-inline' is load-bearing — the page ships one <style>
 #                block plus inline style attributes on the legend swatches.
-#   There is no img-src entry for a tile CDN: the basemap is land.geojson drawn
-#   as a polygon layer, not raster tiles.
+#   img-src      basemaps.cartocdn.com serves the dark_nolabels raster tiles
+#                that fade in past zoom 4.6. Below that the basemap is still
+#                land.geojson drawn as a polygon layer; the tiles exist because
+#                a 1:50m silhouette has nothing left to show at city zoom.
+#                connect-src carries it too — loaders.gl fetches tile images
+#                rather than assigning them to an Image element, so an img-src
+#                entry alone is not enough and the failure is a silently blank
+#                basemap, not an error.
 
 [[headers]]
   for = "/*"
   [headers.values]
-    Content-Security-Policy = "default-src 'self'; script-src 'self' https://cdn.jsdelivr.net https://unpkg.com 'wasm-unsafe-eval' blob:; worker-src blob:; connect-src 'self' https://cdn.jsdelivr.net https://extensions.duckdb.org https://earthquake.usgs.gov blob:; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; object-src 'none'; base-uri 'self'; frame-ancestors 'none'"
+    Content-Security-Policy = "default-src 'self'; script-src 'self' https://cdn.jsdelivr.net https://unpkg.com 'wasm-unsafe-eval' blob:; worker-src blob:; connect-src 'self' https://cdn.jsdelivr.net https://extensions.duckdb.org https://earthquake.usgs.gov https://*.basemaps.cartocdn.com https://services.arcgisonline.com blob:; img-src 'self' data: blob: https://*.basemaps.cartocdn.com https://services.arcgisonline.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; object-src 'none'; base-uri 'self'; frame-ancestors 'none'"
     X-Content-Type-Options = "nosniff"
     Referrer-Policy = "strict-origin-when-cross-origin"
