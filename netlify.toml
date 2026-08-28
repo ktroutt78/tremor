@@ -56,18 +56,23 @@
 #                reproduces in production.
 #   style-src    'unsafe-inline' is load-bearing — the page ships one <style>
 #                block plus inline style attributes on the legend swatches.
-#   img-src      basemaps.cartocdn.com serves the dark_nolabels raster tiles
-#                that fade in past zoom 4.6. Below that the basemap is still
-#                land.geojson drawn as a polygon layer; the tiles exist because
-#                a 1:50m silhouette has nothing left to show at city zoom.
+#   img-src      services.arcgisonline.com serves both raster layers that fade
+#                in past zoom 4.6 — World_Dark_Gray_Base and the dark
+#                hillshade. Below that the basemap is still land.geojson drawn
+#                as a polygon layer; the tiles exist because a 1:50m silhouette
+#                has nothing left to show at city zoom.
 #                connect-src carries it too — loaders.gl fetches tile images
 #                rather than assigning them to an Image element, so an img-src
 #                entry alone is not enough and the failure is a silently blank
 #                basemap, not an error.
+#                basemaps.cartocdn.com is gone: CARTO now requires an API key
+#                and serves keyless requests as a 200 with "API KEY REQUIRED"
+#                painted into the tile, so it degrades into a watermarked map
+#                rather than an error anyone would notice in a console.
 
 [[headers]]
   for = "/*"
   [headers.values]
-    Content-Security-Policy = "default-src 'self'; script-src 'self' https://cdn.jsdelivr.net https://unpkg.com 'wasm-unsafe-eval' blob:; worker-src blob:; connect-src 'self' https://cdn.jsdelivr.net https://extensions.duckdb.org https://earthquake.usgs.gov https://*.basemaps.cartocdn.com https://services.arcgisonline.com blob:; img-src 'self' data: blob: https://*.basemaps.cartocdn.com https://services.arcgisonline.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; object-src 'none'; base-uri 'self'; frame-ancestors 'none'"
+    Content-Security-Policy = "default-src 'self'; script-src 'self' https://cdn.jsdelivr.net https://unpkg.com 'wasm-unsafe-eval' blob:; worker-src blob:; connect-src 'self' https://cdn.jsdelivr.net https://extensions.duckdb.org https://earthquake.usgs.gov https://services.arcgisonline.com blob:; img-src 'self' data: blob: https://services.arcgisonline.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; object-src 'none'; base-uri 'self'; frame-ancestors 'none'"
     X-Content-Type-Options = "nosniff"
     Referrer-Policy = "strict-origin-when-cross-origin"

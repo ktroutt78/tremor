@@ -148,9 +148,19 @@ const cityVisible = (c, z) => z >= CITY_MIN_ZOOM && z >= c.z;
  * survives where it works and real land shows up where it's needed. Labels
  * stay ours (dark_nolabels), so the typography doesn't fight itself. */
 const TILE_FADE_FROM = 4.6, TILE_FADE_TO = 6.2;
-// Additive weight for the dark hillshade. At 0.35: ocean 71, flat land 41,
-// shadowed land 18 — a 2.3x internal contrast on land, water still lighter.
-const HILLSHADE_STRENGTH = 0.35;
+// Additive weight for the dark hillshade, and the number this whole basemap
+// is a compromise around. The hillshade paints ocean as a flat 95 while its
+// land averages ~65, so it lifts water FASTER than land. Against DarkMatter
+// that was free — DarkMatter drew water lighter than land anyway. Against a
+// base that draws land lighter (Esri: land 65, ocean 46) the two fight, and
+// solving for the silhouette's own land/water gap of 17 green levels wants
+// strength 0.0065, i.e. no relief at all.
+//
+// 0.12 is the compromise: land lands on [26,35,51] where the silhouette
+// leaves it, ocean sits above --ground but stays clearly under land, and
+// there is still ~10 levels of relief across a ridge. Measured from a render,
+// not derived — see shots/basemap and the sampling in shoot.mjs's output.
+const HILLSHADE_STRENGTH = 0.12;
 /* Overlays on a map, not objects in a scene: they opt out of depth testing and
  * paint in list order. Harmless with a flat basemap, and it keeps the layer
  * stack honest if elevation is ever tried again. */
@@ -886,29 +896,43 @@ function draw(alphaOverride) {
   //      data and the mesh stays flat however it is lit.
   //   2. Esri World Hillshade, additive — light-on-light (ocean #fcfcfc),
   //      so it added ~250 everywhere and the map turned white.
-  //   3. The same source multiplied — right blend, but CARTO's land is
+  //   3. The same source multiplied — right blend, but the old CARTO base was
   //      #090909 and 9 x 0.45 is 4. Invisible.
   // World_Hillshade_DARK is the one that works: its ocean is a flat 95 and
   // land runs 25 (shadow) to 108 (ridge), so terrain deviates DOWNWARD from a
-  // baseline instead of upward from white. Added at HILLSHADE_STRENGTH the
-  // land gains internal contrast while staying darker than water, which is
-  // the relationship DarkMatter already uses.
+  // baseline instead of upward from white.
+  //
+  // The base was CARTO dark_nolabels until CARTO started requiring a key. It
+  // does not fail loudly — the tiles still return 200, with "API KEY REQUIRED"
+  // baked into the image — so the first symptom is a watermark tiled across
+  // the map past zoom 4.6, and nothing in the console at all.
+  //
+  // Esri's World_Dark_Gray_Base replaces it: keyless, same host as the
+  // hillshade, already in the CSP and the credit line. Note it draws land
+  // LIGHTER than water (measured: land 65, ocean 46) where DarkMatter drew it
+  // darker. That is the silhouette's own relationship — NE land is [26,35,51]
+  // against a [11,18,32] ocean — so the crossfade no longer flips land and
+  // water past each other, which was open item #1 in HANDOFF.md.
   //
   if (tOp > 0) {
     layers.push(new TileLayer({
       id: "terrain",
-      data: "https://a.basemaps.cartocdn.com/dark_nolabels/{z}/{x}/{y}.png",
-      minZoom: 0, maxZoom: 19, tileSize: 256,
+      // {y}/{x}, not {x}/{y} — Esri's REST tile scheme is row before column.
+      data: "https://services.arcgisonline.com/arcgis/rest/services/Canvas/" +
+            "World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}",
+      minZoom: 0, maxZoom: 16, tileSize: 256,
       renderSubLayers: (props) => {
         const { boundingBox: b } = props.tile;
         return new BitmapLayer(props, {
           data: null, image: props.data,
           bounds: [b[0][0], b[0][1], b[1][0], b[1][1]],
           opacity: tOp,
-          // CARTO DarkMatter is neutral grey; the rest of the page is navy.
-          // Multiplying the raster pushes it onto the same hue so the basemap
-          // does not shift colour as it crossfades in.
-          tintColor: [150, 186, 255],
+          // Esri's canvas is neutral grey; the rest of the page is navy. The
+          // multiplier is solved against the silhouette this crossfades out
+          // of, so the handover is a change of detail rather than of colour:
+          // land 65 x [.40,.54,.76] lands on [26,35,51], which is exactly the
+          // GeoJsonLayer fill above, and ocean 46 lands near [11,18,32].
+          tintColor: [88, 118, 168],
         });
       },
       updateTriggers: { renderSubLayers: Math.round(tOp * 12) },

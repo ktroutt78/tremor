@@ -152,8 +152,13 @@ const save = async (page, name) => {
   console.log(`  ${name}.png`);
 };
 
-for (const vp of VIEWPORTS) {
-  if (ONLY && !ONLY.includes(vp.name)) continue;
+const shooting = VIEWPORTS.filter((v) => !ONLY || ONLY.includes(v.name));
+if (!shooting.length) {
+  console.error(`--only matched nothing. Known: ${VIEWPORTS.map((v) => v.name).join(", ")}`);
+  process.exit(2);
+}
+
+for (const vp of shooting) {
   console.log(`${vp.name} ${vp.width}x${vp.height}`);
 
   const ctx = await browser.newContext({
@@ -192,8 +197,9 @@ for (const vp of VIEWPORTS) {
     await page.waitForTimeout(600);
   }
 
-  // Only worth doing once — the presets are the same camera at every size.
-  if (SHOOT_VIEWS && vp.name === "desktop-short") {
+  // Only worth doing once — the presets are the same camera at every size —
+  // so hang them off the first viewport of the run, whatever --only left in it.
+  if (SHOOT_VIEWS && vp === shooting[0]) {
     for (const [id, label] of [["b-ring", "ring-of-fire"], ["b-ca", "california"]]) {
       await page.click(`#${id}`);
       await page.waitForTimeout(2600);       // flyTo is a 900ms transition

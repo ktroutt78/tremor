@@ -71,13 +71,31 @@ cancelling in-flight requests, not a failure; those URLs return 200 to curl.
 
 ## Open
 
-1. **Land/water luminance is inverted between the two basemaps.** CARTO
-   DarkMatter draws land darker than water; the Natural Earth silhouette does
-   the opposite, so they swap relative brightness across the crossfade.
-   Making them agree is a look decision nobody has made yet — deliberately
-   left open rather than guessed at.
-2. **No test covers any of this.** Everything was verified by eye against
-   screenshots. A regression in the label or basemap stack would ship silently.
+1. **The basemap is flatter than it was, and the hillshade is the reason.**
+   Closed the old inversion item and opened this one in its place. CARTO
+   started requiring an API key — keyless requests still return 200, with
+   "API KEY REQUIRED" painted into the tile, so it degraded into a watermarked
+   map with nothing in the console. Esri's World_Dark_Gray_Base replaced it:
+   keyless, same host as the hillshade, already in the CSP.
+
+   That fixes the inversion — Esri draws land lighter than water (measured 65
+   vs 46), which is the silhouette's own relationship — but it costs relief.
+   The dark hillshade paints ocean as a flat 95 against land averaging ~65, so
+   it lifts water faster than land. DarkMatter did not care, because it drew
+   water lighter anyway. Esri does. Solving for both the silhouette's 17-level
+   land/water gap and visible relief wants HILLSHADE_STRENGTH 0.0065, i.e.
+   none, so 0.12 is a compromise and the map reads flatter than it did.
+
+   Three ways out, none tried: a CARTO key restores the old look exactly;
+   masking the hillshade to land.geojson would free the strength to go back
+   up; or a different relief source whose water is dark.
+
+2. **No test covers any of this.** `shoot.mjs` catches a console error or a
+   boot that never finishes, which is better than nothing and does not
+   distinguish a correct map from a watermarked one. Everything visual is
+   still verified by eye — but now against PNGs the harness produces, and
+   values sampled out of them with `magick ... -format %[fx:mean]`, rather
+   than by guessing.
 
 ---
 
