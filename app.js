@@ -574,6 +574,7 @@ function showBanner(text) {
   const b = $("banner");
   b.textContent = text;
   b.style.display = "block";
+  document.body.classList.add("has-banner");
 }
 
 // ---- timeline ------------------------------------------------------------
@@ -1148,6 +1149,10 @@ const hourHTML = (f) => {
     `<span class="felt">${Math.round((Date.now() - p.time) / 6e4)} minutes ago</span>`;
 };
 
+// Same family as the markup's: 16px box, 1.75 stroke, currentColor.
+const IC_CLOSE = `<svg class="ic" viewBox="0 0 16 16" aria-hidden="true"><path d="M4.5 4.5l7 7M11.5 4.5l-7 7"/></svg>`;
+const IC_OUT = `<svg class="ic" viewBox="0 0 16 16" aria-hidden="true"><path d="M6 10l5-5M6.5 5H11v4.5"/></svg>`;
+
 function hideTip() {
   const el = $("tip");
   el.style.display = "none";
@@ -1163,15 +1168,22 @@ function showTip(html, x, y, link) {
     el.classList.add("card");
     el.style.left = el.style.top = el.style.right = el.style.bottom = "";
     el.innerHTML = html +
-      (link ? `<a class="close" href="${link}" target="_blank" rel="noopener">Open USGS event page ↗</a>` : "") +
-      `<span class="close" id="tip-close" role="button" tabindex="0">Close ✕</span>`;
+      (link ? `<a class="close" href="${link}" target="_blank" rel="noopener">Open USGS event page${IC_OUT}</a>` : "") +
+      `<span class="close" id="tip-close" role="button" tabindex="0">Close${IC_CLOSE}</span>`;
     const c = $("tip-close");
     if (c) c.onclick = hideTip;
   } else {
     el.classList.remove("card");
-    el.style.left = Math.min(x + 16, innerWidth - 312) + "px";
-    el.style.top = Math.min(y + 16, innerHeight - 170) + "px";
+    el.style.left = el.style.top = "0px";
     el.innerHTML = html;
+    // Measure first, then place. Clamping to a hardcoded 312x170 put the tip
+    // under the cursor near any edge, which drops the hover that opened it.
+    const { width: tw, height: th } = el.getBoundingClientRect();
+    const pad = 14;
+    const l = x + 16 + tw > innerWidth - pad ? x - 16 - tw : x + 16;
+    const t = y + 16 + th > innerHeight - pad ? y - 16 - th : y + 16;
+    el.style.left = Math.max(pad, l) + "px";
+    el.style.top = Math.max(pad, t) + "px";
   }
 }
 
@@ -1188,7 +1200,7 @@ function eventHTML(r) {
   // Did You Feel It reports — so every enriched row is optional.
   let html =
     `<div class="place">${r.PLACE || "Location pending"}</div>` +
-    `<b>M${Number(r.MAG).toFixed(1)}</b>${r.MAG_TYPE ? ` <span style="color:#55637d">${r.MAG_TYPE}</span>` : ""}` +
+    `<b>M${Number(r.MAG).toFixed(1)}</b>${r.MAG_TYPE ? ` <span style="color:#7c8ca8">${r.MAG_TYPE}</span>` : ""}` +
     ` · ${Math.round(Number(r.DEPTH_KM))} km deep<br/>` +
     `${when.toLocaleString([], { dateStyle: "medium", timeStyle: "short" })}`;
   if (felt > 0) html += `<br/><span class="felt">${commas(felt)} people reported feeling this</span>`;

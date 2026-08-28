@@ -42,6 +42,7 @@
 
   * { box-sizing: border-box; }
 
+
   html, body {
     margin: 0; height: 100%;
     background: var(--ground); color: var(--ink);
@@ -49,8 +50,52 @@
     overflow: hidden;
   }
 
+  /* Surfaces the browser draws for us still have to be ours. */
+  ::selection { background: rgba(255,95,74,.32); color: var(--ink); }
+  html { -webkit-tap-highlight-color: rgba(255,95,74,.18); }
+
+  /* One icon family: sized off the control, 1.75 stroke, currentColor. */
+  .ic {
+    width: 1em; height: 1em; flex: none; display: block;
+    fill: none; stroke: currentColor; stroke-width: 1.75;
+    stroke-linecap: round; stroke-linejoin: round;
+  }
+
+  /* Counters and measurements change in place; proportional digits make them
+     twitch as they do. */
+  #live .n, .stat .v, #magval, .tl-when, #perf, .tl-axis, .lg-axis, #tip b {
+    font-variant-numeric: tabular-nums;
+  }
+
   #map { position: fixed; inset: 0; }
   #map canvas { outline: none; }
+
+  /* ---------- scrollbars ----------
+     Short viewports make the rail scroll. The stock macOS/Windows bar lands a
+     bright grey slab against a dark panel, so give every scrolling surface a
+     thin one that reads as part of the rule work. */
+  #rail, #legend, #tip {
+    scrollbar-width: thin;
+    scrollbar-color: var(--rule) transparent;
+  }
+  #rail::-webkit-scrollbar,
+  #legend::-webkit-scrollbar,
+  #tip::-webkit-scrollbar { width: 8px; height: 8px; }
+  #rail::-webkit-scrollbar-track,
+  #legend::-webkit-scrollbar-track,
+  #tip::-webkit-scrollbar-track { background: transparent; }
+  #rail::-webkit-scrollbar-thumb,
+  #legend::-webkit-scrollbar-thumb,
+  #tip::-webkit-scrollbar-thumb {
+    background: var(--rule); border-radius: 4px;
+    border: 2px solid transparent; background-clip: content-box;
+  }
+  #rail::-webkit-scrollbar-thumb:hover,
+  #legend::-webkit-scrollbar-thumb:hover,
+  #tip::-webkit-scrollbar-thumb:hover { background: #3a4a6a; background-clip: content-box; }
+  #rail::-webkit-scrollbar-corner,
+  #legend::-webkit-scrollbar-corner,
+  #tip::-webkit-scrollbar-corner { background: transparent; }
 
   /* ---------- left rail ---------- */
   #rail {
@@ -60,7 +105,6 @@
     border-right: 1px solid var(--rule);
     padding: 24px 26px 20px;
     overflow-y: auto; z-index: 5;
-    backdrop-filter: blur(8px);
   }
 
   .eyebrow {
@@ -98,8 +142,12 @@
 
   /* ---------- depth ramp: legend and filter ---------- */
   #depth { display: flex; height: 32px; border: 1px solid var(--rule); overflow: hidden; cursor: pointer; }
-  #depth div { flex: 1; display: flex; align-items: center; justify-content: center; font-family: "IBM Plex Mono", monospace; font-size: 9.5px; color: #0b1220; font-weight: 500; transition: opacity .18s; }
+  #depth div { flex: 1; display: flex; align-items: center; justify-content: center; font-family: "IBM Plex Mono", monospace; font-size: 9.5px; color: #0b1220; font-weight: 500; transition: opacity .18s, box-shadow .15s; }
   #depth div.dim { opacity: .2; }
+  /* Inset, because the bands are flush and an outside ring would sit on its
+     neighbour. Dark on hover, ink on focus — both read on all five colours. */
+  #depth div:hover { box-shadow: inset 0 0 0 2px rgba(11,18,32,.55); }
+  #depth div:focus-visible { outline: none; box-shadow: inset 0 0 0 3px var(--ink); }
   #depth .b0 { background: var(--d0); } #depth .b1 { background: var(--d1); }
   #depth .b2 { background: var(--d2); } #depth .b3 { background: var(--d3); }
   #depth .b4 { background: var(--d4); }
@@ -141,13 +189,16 @@
     background: linear-gradient(0deg, rgba(11,18,32,.96), rgba(11,18,32,.72) 70%, transparent);
     padding: 16px 30px 14px; z-index: 4;
   }
-  .tl-head { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 8px; gap: 14px; }
+  /* The timeline's scrim has faded to nothing this high up, so these two sit
+     on whatever the basemap is doing. */
+  .tl-head { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 8px; gap: 14px; text-shadow: 0 1px 4px rgba(11,18,32,.85); }
   .tl-left { display: flex; align-items: baseline; gap: 11px; }
   #tl-clear {
     flex: none; font-family: "IBM Plex Mono", monospace; font-size: 10px;
     letter-spacing: .12em; text-transform: uppercase;
     background: var(--d0); color: #0b1220; border: 1px solid var(--d0);
-    border-radius: 2px; padding: 4px 9px; cursor: pointer;
+    border-radius: 3px; padding: 4px 9px; cursor: pointer;
+    display: inline-flex; align-items: center; gap: 6px;
   }
   #tl-clear:hover { background: var(--d1); border-color: var(--d1); }
   #tl-clear[hidden] { display: none; }
@@ -174,8 +225,8 @@
   #tip .place { color: var(--ink); font-size: 12px; }
   #tip b { color: var(--d1); font-weight: 500; }
   #tip .felt { color: var(--live); }
-  #tip .chip { display: inline-block; padding: 1px 6px; border-radius: 2px; color: #0b1220; font-size: 9.5px; letter-spacing: .1em; text-transform: uppercase; margin-top: 4px; }
-  #tip .hint { color: #55637d; font-size: 10px; }
+  #tip .chip { display: inline-block; padding: 1px 6px; border-radius: 3px; color: #0b1220; font-size: 9.5px; letter-spacing: .1em; text-transform: uppercase; margin-top: 4px; }
+  #tip .hint { color: var(--muted); font-size: 10px; }
 
   /* ---------- boot / perf / footer ---------- */
   #boot { position: fixed; inset: 0; z-index: 20; background: var(--ground); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 16px; }
@@ -185,8 +236,18 @@
   #boot .msg { font-family: "IBM Plex Mono", monospace; font-size: 11.5px; letter-spacing: .12em; text-transform: uppercase; color: var(--muted); }
   #boot .err { color: var(--d0); text-transform: none; letter-spacing: 0; max-width: 480px; text-align: center; line-height: 1.6; }
 
-  #perf { position: fixed; right: 18px; top: 18px; z-index: 6; font-family: "IBM Plex Mono", monospace; font-size: 10.5px; color: var(--muted); text-align: right; line-height: 1.7; }
-  #perf b { color: var(--d4); font-weight: 500; }
+  /* Muted label, ink figure — the same pairing as #live and .stat, so the
+     readout is chrome. It used to set its numbers in var(--d4), which on this
+     map means "300 km down". */
+  #perf {
+    position: fixed; right: 18px; top: 18px; z-index: 6;
+    font-family: "IBM Plex Mono", monospace; font-size: 10.5px;
+    color: var(--muted); text-align: right; line-height: 1.7;
+    text-shadow: 0 1px 3px rgba(11,18,32,.9);
+  }
+  #perf b { color: var(--ink); font-weight: 500; }
+  /* The stale-archive banner lands on top of it otherwise. */
+  body.has-banner #perf { top: 56px; }
 
   #banner {
     position: fixed; top: 0; left: 420px; right: 0; z-index: 7; display: none;
@@ -218,36 +279,43 @@
   #legend-show[hidden] { display: none; }
   #legend-show:hover { color: var(--ink); border-color: #3a4a6b; }
   #legend-show .key {
-    border: 1px solid var(--rule); border-radius: 2px;
-    padding: 0 4px; font-size: 9px; color: #55637d;
+    border: 1px solid var(--rule); border-radius: 3px;
+    padding: 0 4px; font-size: 9px; color: var(--muted);
   }
   #legend-show .swatches { display: flex; width: 34px; height: 8px; }
   #legend-show .swatches i { flex: 1; }
   .lg-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
   .lg-head span { letter-spacing: .18em; text-transform: uppercase; color: var(--muted); }
   #lg-close {
-    flex: none; width: 18px; height: 18px; padding: 0; font-size: 13px;
-    line-height: 1; background: transparent; border: 1px solid var(--rule);
-    color: var(--muted); border-radius: 2px; cursor: pointer;
+    flex: none; width: 20px; height: 20px; padding: 0; font-size: 12px;
+    display: flex; align-items: center; justify-content: center;
+    background: transparent; border: 1px solid var(--rule);
+    color: var(--muted); border-radius: 3px; cursor: pointer;
   }
   #lg-close:hover { color: var(--ink); border-color: #3a4a6b; }
   .lg-sec { margin-bottom: 11px; }
-  .lg-t { letter-spacing: .14em; text-transform: uppercase; color: #55637d; margin-bottom: 6px; }
+  .lg-t { letter-spacing: .14em; text-transform: uppercase; color: var(--muted); margin-bottom: 6px; }
   .lg-ramp { display: flex; height: 11px; }
   .lg-ramp div { flex: 1; }
-  .lg-axis { display: flex; justify-content: space-between; margin-top: 4px; color: #55637d; }
+  .lg-axis { display: flex; justify-content: space-between; margin-top: 4px; color: var(--muted); }
   .lg-mags { display: flex; align-items: flex-end; justify-content: space-between; gap: 3px; height: 34px; padding: 0 1px; }
   .lg-mag { display: flex; flex-direction: column; align-items: center; gap: 4px; min-width: 0; }
-  .lg-mag span { font-size: 8.5px; color: #55637d; }
+  .lg-mag span { font-size: 8.5px; color: var(--muted); }
   .lg-mag i { display: block; border-radius: 50%; background: var(--d0); opacity: .82; }
   .lg-row { display: flex; align-items: center; gap: 8px; margin-top: 5px; }
   .lg-ring { width: 12px; height: 12px; border-radius: 50%; flex: none; background: transparent; }
   .lg-ring.hour { border: 1.5px solid var(--live); }
   .lg-ring.major { border: 1px solid #e2e9f5; }
-  .lg-cap { color: #55637d; line-height: 1.45; }
+  /* The rail already draws the line: mono labels and figures, Barlow for
+     anything that is read as a sentence. The legend was setting 40 words of
+     running prose in 9.5px mono. */
+  .lg-cap {
+    font-family: Barlow, system-ui, sans-serif;
+    font-size: 11px; color: var(--muted); line-height: 1.45;
+  }
 
-  .credit { font-size: 11px; color: #55637d; line-height: 1.55; margin-top: 20px; }
-  #footer { font-family: "IBM Plex Mono", monospace; font-size: 10px; color: #55637d; margin-top: 14px; display: flex; align-items: center; gap: 7px; }
+  .credit { font-size: 11px; color: var(--muted); line-height: 1.55; margin-top: 20px; }
+  #footer { font-family: "IBM Plex Mono", monospace; font-size: 10px; color: var(--muted); margin-top: 14px; display: flex; align-items: center; gap: 7px; }
   #footer .amber { width: 7px; height: 7px; border-radius: 50%; background: var(--amber); display: none; flex: none; }
 
   @media (prefers-reduced-motion: reduce) {
@@ -262,7 +330,7 @@
   #sheet-handle { display: none; }
 
   @media (max-width: 900px) {
-    :root { --peek: 184px; --tl-h: 76px; }
+    :root { --peek: 208px; --tl-h: 76px; }
 
     #sheet-handle {
       display: flex; align-items: center; justify-content: space-between;
@@ -276,14 +344,24 @@
       position: absolute; top: 5px; left: 50%; transform: translateX(-50%);
       width: 38px; height: 3px; border-radius: 2px; background: var(--rule);
     }
-    #sheet-handle .chev { transition: transform .2s; }
+    #sheet-handle .chev { width: 15px; height: 15px; transition: transform .2s; }
     body.sheet-open #sheet-handle .chev { transform: rotate(180deg); }
+
+    /* #rail turns into a column flex container here, which hands every child
+       flex-shrink:1. With the content taller than the sheet, that crushed
+       #depth from 44px to 2px and every .rule to 0 — the depth filter was a
+       hairline on every phone. */
+    #rail > * { flex: none; }
 
     #rail {
       top: auto; bottom: 0; left: 0; right: 0; width: 100%;
       height: var(--peek); max-height: 86vh;
       padding: 0 16px 16px; position: fixed;
       border-right: none; border-top: 1px solid var(--rule);
+      /* Animating height reflows the sheet's own children for ~220ms. The
+         alternative is a full-height sheet translated off-screen, which
+         restructures the peek/expand mechanic for one interaction; #map is
+         fixed and does not participate in the reflow. Kept deliberately. */
       overflow: hidden; transition: height .22s ease;
       display: flex; flex-direction: column; align-items: stretch;
     }
@@ -301,8 +379,11 @@
 
     /* 44px minimum touch targets throughout */
     button { min-height: 44px; padding: 11px 6px; font-size: 11px; }
+    /* At 28% the five windows wrapped to 3+2, and the second row fell below
+       the collapsed sheet — so "30 days", the default, was off-screen in the
+       one control the peek exists to expose. They fit on one line. */
     #windows { flex-wrap: wrap; }
-    #windows button { flex: 1 1 28%; }
+    #windows button { flex: 1 1 18%; padding: 11px 4px; }
     #depth { height: 44px; }
     #depth div { font-size: 11px; }
     #magwrap { min-height: 44px; }
@@ -341,7 +422,8 @@
       pointer-events: auto; font-size: 11.5px; padding: 12px 13px;
     }
     #tip .close {
-      display: block; margin-top: 9px; padding-top: 8px;
+      display: flex; align-items: center; gap: 6px;
+      margin-top: 9px; padding-top: 8px;
       border-top: 1px solid var(--rule); color: var(--muted);
       letter-spacing: .14em; text-transform: uppercase; font-size: 10px;
     }
@@ -364,7 +446,7 @@
   <button id="sheet-handle" aria-expanded="false" aria-controls="rail">
     <span class="grip"></span>
     <span id="sheet-label">Filters &amp; detail</span>
-    <span class="chev">▲</span>
+    <svg class="ic chev" viewBox="0 0 16 16" aria-hidden="true"><path d="M4 10l4-4 4 4"/></svg>
   </button>
   <div class="eyebrow" id="eyebrow">USGS ANSS · Queried client-side</div>
   <h1>The ground<br />is <span class="hot">never</span><br />still.</h1>
@@ -473,7 +555,7 @@
   <div class="tl-head">
     <div class="tl-left">
       <div class="tl-when" id="tl-when">—</div>
-      <button id="tl-clear" hidden title="Clear month filter (Esc)">Clear ✕</button>
+      <button id="tl-clear" hidden title="Clear month filter (Esc)">Clear<svg class="ic" viewBox="0 0 16 16" aria-hidden="true"><path d="M4.5 4.5l7 7M11.5 4.5l-7 7"/></svg></button>
     </div>
     <div class="eyebrow" id="tl-lab">Events per month · M4.5+</div>
   </div>
@@ -485,7 +567,7 @@
 <div id="legend" aria-label="Map legend">
   <div class="lg-head">
     <span>Legend</span>
-    <button id="lg-close" title="Hide legend (L)" aria-label="Hide legend">×</button>
+    <button id="lg-close" title="Hide legend (L)" aria-label="Hide legend"><svg class="ic" viewBox="0 0 16 16" aria-hidden="true"><path d="M4.5 4.5l7 7M11.5 4.5l-7 7"/></svg></button>
   </div>
 
   <div class="lg-sec">
@@ -525,7 +607,7 @@
 <div id="perf"></div>
 <div id="tip"></div>
 
-<div id="boot">
+<div id="boot" role="status" aria-live="polite">
   <div class="msg" id="boot-msg">Starting</div>
   <div class="bar-wrap"><div class="bar-fill"></div></div>
 </div>
