@@ -12,3 +12,7 @@ majors.parquet
 
 # Drafts, not project files.
 linkedin-serverless-dashboards.md
+
+# Dev tooling only — see package.json. Nothing here is deployed.
+node_modules/
+shots/

@@ -1,0 +1,12 @@
+{
+  "name": "tremor",
+  "private": true,
+  "description": "Dev tooling only. The site itself is static — index.html, app.js and the data files ship as they are, with no build step.",
+  "scripts": {
+    "serve": "python3 serve.py",
+    "shoot": "node shoot.mjs"
+  },
+  "devDependencies": {
+    "playwright-core": "^1.56.0"
+  }
+}

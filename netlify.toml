@@ -1,5 +1,15 @@
 [build]
   publish = "."
+  # There is no build. package.json exists only for the dev tooling (shoot.mjs
+  # needs playwright-core), and a bare package.json is enough for Netlify to
+  # start guessing at a framework and a build command. Saying so explicitly
+  # keeps the deploy what it has always been: publish the repo as-is.
+  command = "echo 'static site - nothing to build'"
+
+[build.environment]
+  # Nothing in devDependencies is needed to serve the site, and playwright-core
+  # has no business being fetched on a deploy.
+  NPM_FLAGS = "--production --no-audit --no-fund"
 
 # Netlify's default is `max-age=0, must-revalidate` on everything, which would
 # make the immutable-Parquet design silently inert. The two rules below are the

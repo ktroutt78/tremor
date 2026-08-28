@@ -6,16 +6,26 @@ not rediscovering.
 
 ---
 
-## The one thing that would help most
+## The screenshot harness exists — use it
 
-Every change here is visual and the agent making them cannot see the rendered
-output. Each iteration was: change → wait for a screenshot → find out it was
-wrong. Several fixes made things worse before getting better, and two whole
-rounds were spent tuning lighting on a mesh that could never have rendered.
+This file used to open by asking for one. `shoot.mjs` is it.
 
-**A headless screenshot script — Playwright against localhost, save PNGs at a
-few zooms, agent reads them — would collapse a five-round loop into one.**
-Do this before any further visual work.
+    npm install && npx playwright install chromium    # once
+    node shoot.mjs                                    # → shots/*.png
+
+It serves the working tree, waits for `#boot` to clear, and shoots six
+viewports at 2x, plus the mobile sheet open. `--views` adds the Ring of Fire
+and California presets; `--zoom N` wheel-steps out of California to cross the
+4.6–6.2 tile crossfade. It exits non-zero if any page logged a console error or
+never finished booting, which is the only automated check this project has.
+
+Do not change anything visual without shooting before and after. The loop this
+replaced was change → wait for a screenshot → find out it was wrong, and two
+whole rounds of it went into lighting a mesh that could never have rendered.
+
+One limit worth knowing: `deckgl` is module-scoped in app.js, so the harness
+cannot set a camera directly. `--zoom` steps the mouse wheel and labels the
+shots by step count, not by zoom level. Exact zooms need a seam in app.js.
 
 ---
 
@@ -61,11 +71,13 @@ cancelling in-flight requests, not a failure; those URLs return 200 to curl.
 
 ## Open
 
-1. The hillshade, unverified (above).
-2. **Land/water luminance is inverted between the two basemaps.** CARTO
+1. **Land/water luminance is inverted between the two basemaps.** CARTO
    DarkMatter draws land darker than water; the Natural Earth silhouette does
    the opposite, so they swap relative brightness across the crossfade.
-   Making them agree is a look decision nobody has made yet.
+   Making them agree is a look decision nobody has made yet — deliberately
+   left open rather than guessed at.
+2. **No test covers any of this.** Everything was verified by eye against
+   screenshots. A regression in the label or basemap stack would ship silently.
 
 ---
 
@@ -96,10 +108,14 @@ thinning them. Replaced by `declutter()`.
 2. `manifest.json` did not name `cities.json` until the Monday refresh
    regenerated it; `manifest.cities || "cities.json"` covered the gap.
 3. Push to `main` deploys to tremor.keithtroutt.com via Netlify.
-4. The screenshot harness this file asked for exists now — drive the app at a
-   set of zooms and save PNGs, rather than changing and hoping.
+4. `shoot.mjs`, `serve.py`, `package.json` and `node_modules/` are dev tooling.
+   The deploy is still every other file, unbuilt and unbundled.
 
 ## Local dev
 
+    python3 serve.py        # http://localhost:8080
+
 A **no-cache** server matters — a cached `manifest.json` or Parquet pins you to
-stale data and looks like an app bug.
+stale data and looks like an app bug. `serve.py` suppresses `Last-Modified` as
+well as setting `no-store`, because with a validator present the browser still
+revalidates and takes a 304.

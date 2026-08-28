@@ -48,6 +48,26 @@ Source: USGS Advanced National Seismic System (ANSS) Comprehensive Catalog via
 the FDSN event service, plus the past-hour and past-month live feeds.
 Coastlines: Natural Earth 1:50m.
 
+## Local development
+
+The site is static and has no build step — open it through a server, not as a
+`file://` URL, or the module script and the fetches both fail.
+
+    python3 serve.py                                 # http://localhost:8080
+
+`serve.py` sends `no-store` and strips `Last-Modified`. That matters more than
+it looks: `manifest.json` names the current Parquet, and a stale copy points
+the client at a file the archive refresh may already have pruned.
+
+Visual changes get checked with a headless browser rather than by eye:
+
+    npm install && npx playwright install chromium   # once
+    node shoot.mjs                                   # → shots/*.png
+
+Six viewports at 2x plus the mobile sheet. It exits non-zero on a console error
+or a boot that never completes. `node shoot.mjs --help` is the source; the flags
+are documented at the top of the file.
+
 ## Caching
 
 `netlify.toml` is load-bearing. Netlify defaults to `max-age=0,
