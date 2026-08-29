@@ -272,6 +272,27 @@ const fmt = (n) =>
   n >= 1e3 ? (n / 1e3).toFixed(1) + "K" : String(Math.round(n));
 const commas = (n) => Math.round(n).toLocaleString();
 
+// The rolling windows are anchored to now, so what they cover is a real date
+// range and the label may as well say it. "Past week" restates the pressed
+// button; "August 21 – 27" says what is actually on the map. Month-first to
+// match monthLabel, and the year appears only when the span crosses one.
+function windowRangeLabel(w) {
+  const span = WINDOWS[w].ms;
+  if (!span) return null;
+  const end = new Date(), start = new Date(Date.now() - span);
+  if (w === "hour") {
+    const t = (d) => d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+    return `${t(start)} – ${t(end)}`;
+  }
+  const m = (d) => MONTH_NAMES[d.getMonth()];
+  if (start.getFullYear() !== end.getFullYear())
+    return `${m(start)} ${start.getDate()}, ${start.getFullYear()} – ` +
+           `${m(end)} ${end.getDate()}, ${end.getFullYear()}`;
+  if (start.getMonth() === end.getMonth())
+    return `${m(end)} ${start.getDate()} – ${end.getDate()}`;
+  return `${m(start)} ${start.getDate()} – ${m(end)} ${end.getDate()}`;
+}
+
 // "2015-01" reads like a database key. Spell the months out.
 const MONTH_NAMES = ["January", "February", "March", "April", "May", "June",
   "July", "August", "September", "October", "November", "December"];
@@ -648,11 +669,16 @@ function drawBarState() {
   const bars = $("bars").children;
   for (let i = 0; i < bars.length; i++)
     bars[i].classList.toggle("on", state.month === monthKeys[i]);
+  // Keyed off the selected window, not off hasArchive. Loading the decade
+  // sets hasArchive for good, so testing it here left the label stuck on the
+  // full archive span for every window picked afterwards.
   $("tl-when").textContent = state.month
     ? monthLabel(state.month)
-    : hasArchive
-      ? `${monthLabel(monthKeys[0])} – ${monthLabel(monthKeys.at(-1))}`
-      : `Past ${WINDOWS[state.window].label.toLowerCase()}`;
+    : state.window === "all"
+      ? (hasArchive && monthKeys.length
+          ? `${monthLabel(monthKeys[0])} – ${monthLabel(monthKeys.at(-1))}`
+          : "The whole archive")
+      : windowRangeLabel(state.window);
   // The clear control appears beside the filter it clears, and the rail
   // button lights up when there is something to clear rather than dimming.
   $("tl-clear").hidden = !state.month;
