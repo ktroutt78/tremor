@@ -1,17 +1,17 @@
 {
-  "parquet": "quakes-2026-09-07.parquet",
-  "majors": "majors-2026-09-07.parquet",
+  "parquet": "quakes-2026-09-14.parquet",
+  "majors": "majors-2026-09-14.parquet",
   "land": "land.geojson",
   "borders": "borders.geojson",
   "labels": "labels.json",
   "cities": "cities.json",
-  "built_at": "2026-09-07T11:35:26Z",
+  "built_at": "2026-09-14T11:48:26Z",
   "coverage_start": "2015-01-01T05:01:10Z",
-  "coverage_end": "2026-09-07T05:50:44Z",
-  "event_count": 86749,
+  "coverage_end": "2026-09-14T10:59:54Z",
+  "event_count": 86876,
   "major_count": 1584,
   "min_magnitude": 4.5,
-  "bytes": 3100562,
+  "bytes": 3104078,
   "monthly": {
     "2015-01": 555,
     "2015-02": 520,
@@ -151,9 +151,9 @@
     "2026-04": 683,
     "2026-05": 520,
     "2026-06": 711,
-    "2026-07": 779,
-    "2026-08": 711,
-    "2026-09": 104
+    "2026-07": 781,
+    "2026-08": 751,
+    "2026-09": 189
   },
   "source": "USGS ComCat via fdsnws/event/1"
 }
