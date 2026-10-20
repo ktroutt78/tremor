@@ -69,10 +69,13 @@
 #                and serves keyless requests as a 200 with "API KEY REQUIRED"
 #                painted into the tile, so it degrades into a watermarked map
 #                rather than an error anyone would notice in a console.
+#   analytics    googletagmanager (gtag loader, script-src) plus
+#                google-analytics / analytics.google.com (hits, connect-src
+#                and img-src). Config lives in analytics.js, not inline.
 
 [[headers]]
   for = "/*"
   [headers.values]
-    Content-Security-Policy = "default-src 'self'; script-src 'self' https://cdn.jsdelivr.net https://unpkg.com 'wasm-unsafe-eval' blob:; worker-src blob:; connect-src 'self' https://cdn.jsdelivr.net https://extensions.duckdb.org https://earthquake.usgs.gov https://services.arcgisonline.com blob:; img-src 'self' data: blob: https://services.arcgisonline.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; object-src 'none'; base-uri 'self'; frame-ancestors 'none'"
+    Content-Security-Policy = "default-src 'self'; script-src 'self' https://cdn.jsdelivr.net https://unpkg.com https://*.googletagmanager.com 'wasm-unsafe-eval' blob:; worker-src blob:; connect-src 'self' https://cdn.jsdelivr.net https://extensions.duckdb.org https://earthquake.usgs.gov https://services.arcgisonline.com https://*.google-analytics.com https://*.analytics.google.com https://*.googletagmanager.com blob:; img-src 'self' data: blob: https://services.arcgisonline.com https://*.google-analytics.com https://*.googletagmanager.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; object-src 'none'; base-uri 'self'; frame-ancestors 'none'"
     X-Content-Type-Options = "nosniff"
     Referrer-Policy = "strict-origin-when-cross-origin"
